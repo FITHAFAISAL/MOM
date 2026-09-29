@@ -25,8 +25,18 @@ app.add_middleware(
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_DIR = os.path.join(BASE_DIR, "models", "sherpa-onnx-streaming-zipformer-en-2023-06-26")
+MODELS_PARENT_DIR = os.path.join(BASE_DIR, "models")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+
+def get_active_model_dir():
+    if os.path.exists(MODELS_PARENT_DIR):
+        for item in os.listdir(MODELS_PARENT_DIR):
+            full_path = os.path.join(MODELS_PARENT_DIR, item)
+            if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, "tokens.txt")):
+                return full_path
+    return os.path.join(MODELS_PARENT_DIR, "sherpa-onnx-streaming-zipformer-en-2023-06-26")
+
+MODEL_DIR = get_active_model_dir()
 
 # Initialize Transcriber & MOM Generator
 transcriber = SherpaTranscriber(MODEL_DIR)
@@ -44,9 +54,16 @@ class MOMRequest(BaseModel):
 
 @app.get("/api/status")
 def get_status():
+    global transcriber, MODEL_DIR
+    if not transcriber.is_loaded:
+        active = get_active_model_dir()
+        if os.path.exists(active) and os.path.exists(os.path.join(active, "tokens.txt")):
+            MODEL_DIR = active
+            transcriber.load_model(MODEL_DIR)
     return {
         "status": "online",
-        "engine": "sherpa-onnx",
+        "engine": "sherpa-onnx-offline",
+        "offline_mandatory": True,
         "model_dir": MODEL_DIR,
         "is_model_loaded": transcriber.is_loaded,
         "load_error": transcriber.load_error,
@@ -76,7 +93,7 @@ async def websocket_endpoint(websocket: WebSocket):
         })
 
     stream = transcriber.create_stream()
-    last_text = ""
+    last_interim = ""
 
     try:
         while True:
@@ -84,25 +101,36 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if "bytes" in message and message["bytes"]:
                 raw_bytes = message["bytes"]
-                current_text = transcriber.process_pcm_bytes(stream, raw_bytes)
-                if current_text and current_text != last_text:
-                    last_text = current_text
+                current_text, is_endpoint = transcriber.decode_chunk(stream, raw_bytes)
+                clean = current_text.strip() if current_text else ""
+                
+                if is_endpoint and clean:
+                    last_interim = ""
+                    await websocket.send_json({
+                        "type": "transcription",
+                        "is_final": True,
+                        "text": clean
+                    })
+                elif clean and clean != last_interim:
+                    last_interim = clean
                     await websocket.send_json({
                         "type": "transcription",
                         "is_final": False,
-                        "text": current_text
+                        "text": clean
                     })
             elif "text" in message and message["text"]:
                 data = json.loads(message["text"])
                 if data.get("action") == "finalize":
-                    final_text = transcriber.process_pcm_bytes(stream, b"")
-                    await websocket.send_json({
-                        "type": "transcription",
-                        "is_final": True,
-                        "text": final_text
-                    })
+                    final_text = transcriber.finalize_stream(stream)
+                    clean = (final_text or "").strip()
+                    if clean:
+                        await websocket.send_json({
+                            "type": "transcription",
+                            "is_final": True,
+                            "text": clean
+                        })
                     stream = transcriber.create_stream()
-                    last_text = ""
+                    last_interim = ""
 
     except WebSocketDisconnect:
         print("[WS] Client disconnected.")

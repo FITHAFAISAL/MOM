@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sherpa ONNX Real-Time Speech-to-Text & MOM Platform</title>
+  <title>Sherpa Voice - Real-Time Speech & MOM Platform</title>
   <!-- Google Fonts & Font Awesome Icons -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -19,154 +19,340 @@
         <i class="fa-solid fa-microphone-lines"></i>
       </div>
       <div class="brand-text">
-        <h1>Sherpa-MOM</h1>
-        <p>Real-Time Speech Recognition & Minutes of Meeting Platform</p>
+        <h1>Sherpa Voice <span class="tag-badge">Real-Time STT & MOM</span></h1>
+        <p>Live Speech Detection from Mic & Device Audio • Minutes of Meeting</p>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="status-pill" id="backendStatusPill" title="Server Connection Status">
+        <span class="dot green" id="backendDot"></span>
+        <span id="backendStatusText">Server Online</span>
+      </div>
+      <div class="status-pill" id="engineStatusPill" title="Speech Engine Mode">
+        <i class="fa-solid fa-microchip"></i>
+        <span id="engineStatusText">Sherpa / WebSpeech</span>
+      </div>
+      <div class="status-pill" id="audioModePill" title="Selected Audio Capture Mode">
+        <i class="fa-solid fa-headphones"></i>
+        <span id="audioModeStatusText">Mic + Device Audio</span>
       </div>
     </div>
   </header>
 
   <!-- Main Container -->
   <main class="main-container">
-    <!-- Meeting Setup Bar -->
-    <section class="meeting-meta-bar">
-      <div class="meta-input-group">
-        <i class="fa-solid fa-heading"></i>
-        <input type="text" id="meetingTitleInput" value="Q4 Product Roadmap & Sprint Sync" placeholder="Meeting Title...">
-      </div>
-      
-      <div class="meta-input-group">
-        <i class="fa-solid fa-users"></i>
-        <input type="text" id="meetingAttendeesInput" value="Alex (Host), Sarah (Dev Lead), Marcus (Design)" placeholder="Attendees (comma separated)...">
-      </div>
-    </section>
-
     <!-- Recording Control Deck & Audio Visualizer -->
     <section class="control-deck-card">
       <div class="deck-controls">
-        <button id="startRecordBtn" class="btn btn-primary primary-glow">
-          <i class="fa-solid fa-microphone"></i> Start Real-Time Mic
+        <!-- Main Start/Stop Record Button -->
+        <button id="toggleRecordBtn" class="btn btn-primary primary-glow" title="Start real-time speech detection">
+          <i class="fa-solid fa-microphone"></i>
+          <span>Start Listening</span>
         </button>
-        <button id="stopRecordBtn" class="btn btn-danger" disabled>
-          <i class="fa-solid fa-square"></i> Stop Recording
-        </button>
-        <button id="demoStreamBtn" class="btn btn-accent">
-          <i class="fa-solid fa-wand-magic-sparkles"></i> Run Live Demo Stream
-        </button>
-        <button id="generateMomBtn" class="btn btn-secondary">
-          <i class="fa-solid fa-bolt"></i> Refresh MOM Summary
+
+        <!-- Audio Source Picker (Mic, Device Audio, Both) -->
+        <div class="audio-source-picker-group" title="Select audio input: Microphone, Device/Meeting Sound, or Both">
+          <i class="fa-solid fa-sliders"></i>
+          <label for="audioSourceSelect">Audio Source:</label>
+          <select id="audioSourceSelect">
+            <option value="both" selected>🎙️+💻 Both: Mic + Device Audio (Meeting Mode)</option>
+            <option value="device">💻 Device / System Audio (Meeting Tab or App)</option>
+            <option value="mic">🎙️ Microphone Only</option>
+          </select>
+          <button id="deviceAudioHelpBtn" class="help-circle-btn" title="How to capture device/meeting audio in browser" type="button">
+            <i class="fa-solid fa-circle-question"></i>
+          </button>
+        </div>
+
+        <!-- Language Picker -->
+        <div class="language-picker-group" title="Speech Recognition Language">
+          <i class="fa-solid fa-globe"></i>
+          <select id="languageSelect">
+            <option value="en-US" selected>English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="en-IN">English (India)</option>
+            <option value="es-ES">Spanish (Español)</option>
+            <option value="fr-FR">French (Français)</option>
+            <option value="de-DE">German (Deutsch)</option>
+            <option value="zh-CN">Chinese (Mandarin)</option>
+            <option value="ja-JP">Japanese</option>
+            <option value="ar-SA">Arabic</option>
+          </select>
+        </div>
+
+        <!-- Simulated Demo Button -->
+        <button id="demoStreamBtn" class="btn btn-secondary" title="Simulate real-time multi-speaker meeting stream">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+          <span>Test Demo Speech</span>
         </button>
       </div>
 
+      <!-- Recording Indicator & Waveform -->
       <div class="recording-indicator-group">
-        <div class="timer-display">
+        <div class="timer-display" title="Recording session elapsed time">
           <i class="fa-regular fa-clock"></i>
           <span id="sessionTimer">00:00:00</span>
         </div>
 
-        <div class="visualizer-container">
-          <canvas id="waveformCanvas" width="300" height="40"></canvas>
+        <div class="visualizer-container" title="Live audio waveform (Mic + Device sound)">
+          <canvas id="waveformCanvas" width="240" height="38"></canvas>
         </div>
       </div>
     </section>
 
-    <!-- Content Workspace Grid -->
-    <div class="workspace-grid">
-      
-      <!-- Left Column: Live Speech Transcript -->
-      <section class="panel-card live-transcript-panel">
-        <div class="panel-header">
-          <h2><i class="fa-solid fa-stream"></i> Real-Time Speech Stream</h2>
-          <div class="panel-actions">
-            <div class="search-box">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input type="text" id="transcriptSearchInput" placeholder="Filter transcript...">
-            </div>
-            <button id="clearTranscriptBtn" class="btn-text" title="Clear Transcript"><i class="fa-solid fa-trash-can"></i></button>
+    <!-- Real-Time Speech Detection Banner (Shows Live Interim Speech as Spoken) -->
+    <section class="live-stream-box" id="liveStreamBox">
+      <div class="live-pulse-container">
+        <span class="live-pulse-badge" id="livePulseBadge">
+          <i class="fa-solid fa-circle"></i>
+          <span id="liveStatusText">READY</span>
+        </span>
+        <div class="live-source-tag" id="liveSourceTag">
+          <i class="fa-solid fa-broadcast-tower"></i> Source: Mic + Device Audio
+        </div>
+        <div class="live-bars" id="liveBars">
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+      <p id="livePartialText" class="partial-text">Microphone & device audio idle. Click "Start Listening" to begin real-time speech detection.</p>
+    </section>
+
+    <!-- Main Real-Time Speech Text Box Panel -->
+    <section class="text-box-panel">
+      <!-- Toolbar Header -->
+      <div class="text-box-toolbar">
+        <div class="toolbar-left">
+          <div class="panel-title">
+            <i class="fa-solid fa-file-lines"></i>
+            <h2>Real-Time Speech Text Box</h2>
+          </div>
+          <div class="text-stats">
+            <span class="stat-pill" id="wordCountPill">0 words</span>
+            <span class="stat-pill" id="charCountPill">0 characters</span>
           </div>
         </div>
 
-        <!-- Live Partial Stream Banner -->
-        <div class="live-stream-box" id="liveStreamBox">
-          <span class="live-pulse-badge"><i class="fa-solid fa-circle"></i> DETECTING SPEECH</span>
-          <p id="livePartialText" class="partial-text">Listening for speech input...</p>
+        <div class="toolbar-actions">
+          <!-- PREPARE MOM ACTION BUTTON -->
+          <button id="prepareMomBtn" class="tool-btn tool-btn-mom" title="Prepare Minutes of Meeting (MOM) from this transcribed text">
+            <i class="fa-solid fa-file-signature"></i>
+            <span>Prepare MOM</span>
+          </button>
+
+          <!-- Timestamps Toggle -->
+          <button id="toggleTimestampBtn" class="tool-btn" title="Toggle timestamps for recognized phrases">
+            <i class="fa-regular fa-clock"></i>
+            <span>Timestamps: Off</span>
+          </button>
+
+          <!-- Font Size Adjuster -->
+          <div class="font-size-group">
+            <button id="fontDecBtn" class="tool-btn-icon" title="Decrease font size">
+              <i class="fa-solid fa-minus"></i>
+            </button>
+            <span class="font-size-label" id="fontSizeLabel">16px</span>
+            <button id="fontIncBtn" class="tool-btn-icon" title="Increase font size">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </div>
+
+          <!-- Copy Text -->
+          <button id="copyTextBtn" class="tool-btn tool-btn-primary" title="Copy all transcribed text">
+            <i class="fa-solid fa-copy"></i>
+            <span>Copy Text</span>
+          </button>
+
+          <!-- Save Text File -->
+          <button id="downloadTextBtn" class="tool-btn" title="Download as text file">
+            <i class="fa-solid fa-download"></i>
+            <span>Save .txt</span>
+          </button>
+
+          <!-- Clear Text -->
+          <button id="clearTextBtn" class="tool-btn tool-btn-danger" title="Clear text box">
+            <i class="fa-solid fa-trash-can"></i>
+            <span>Clear</span>
+          </button>
         </div>
+      </div>
 
-        <!-- Transcript Feed Scroll List -->
-        <div class="transcript-feed" id="transcriptFeed">
-          <div class="empty-state" id="emptyTranscriptState">
-            <i class="fa-solid fa-waveform"></i>
-            <p>Click <strong>Start Real-Time Mic</strong> or <strong>Run Live Demo Stream</strong> to begin speech detection.</p>
-          </div>
+      <!-- Dedicated Real-Time Text Box Area -->
+      <div class="text-box-wrapper">
+        <textarea
+          id="speechTextBox"
+          class="speech-text-box"
+          placeholder="Speech from your microphone AND device audio (Zoom, Google Meet, Teams, Video, etc.) is detected in real time and transcribed directly into this text box...
+
+• Click 'Start Listening' to capture your microphone and device sound.
+• When sharing device audio, check 'Share tab audio' or 'Also share system audio' to transcribe other meeting participants!
+• When finished, click 'Prepare MOM' above to instantly generate your Minutes of Meeting."
+          spellcheck="true"
+        ></textarea>
+        
+        <!-- Live status tag in bottom corner of text box -->
+        <div class="text-box-status-tag" id="textBoxStatusTag">
+          <i class="fa-solid fa-keyboard"></i>
+          <span id="textBoxStatusMsg">Ready for speech input</span>
         </div>
-      </section>
+      </div>
 
-      <!-- Right Column: Minutes of Meeting (MOM) AI Board -->
-      <section class="panel-card mom-board-panel" id="printableMomArea">
-        <div class="panel-header">
-          <h2><i class="fa-solid fa-file-signature"></i> Minutes of Meeting (MOM)</h2>
-          <div class="panel-actions">
-            <button id="exportPdfBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-file-pdf"></i> Export PDF</button>
-            <button id="exportMdBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-file-code"></i> Markdown</button>
-            <button id="copyMomBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-copy"></i> Copy</button>
-          </div>
+      <!-- Footer Hints -->
+      <div class="text-box-footer">
+        <div class="footer-hint">
+          <i class="fa-solid fa-lightbulb"></i>
+          <span>Meeting Mode captures both your voice and meeting sound from your device. Click <strong>Prepare MOM</strong> anytime to format minutes.</span>
         </div>
-
-        <div class="mom-content-scroll" id="momContentScroll">
-          
-          <!-- Executive Summary -->
-          <div class="mom-section-card">
-            <h3><i class="fa-solid fa-align-left"></i> Executive Summary</h3>
-            <p id="momExecutiveSummary" class="mom-summary-text">
-              Real-time MOM summary will generate automatically as transcript items are captured.
-            </p>
-          </div>
-
-          <!-- Key Decisions -->
-          <div class="mom-section-card">
-            <h3><i class="fa-solid fa-circle-check"></i> Key Decisions Made</h3>
-            <ul id="momDecisionsList" class="mom-list decisions-list">
-              <li class="empty-item">No key decisions captured yet.</li>
-            </ul>
-          </div>
-
-          <!-- Action Items Table -->
-          <div class="mom-section-card">
-            <div class="section-title-row">
-              <h3><i class="fa-solid fa-list-check"></i> Action Items & Owners</h3>
-              <button id="addManualActionBtn" class="btn-text-sm"><i class="fa-solid fa-plus"></i> Add Action</button>
-            </div>
-            <div class="table-responsive">
-              <table class="action-items-table">
-                <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Task Description</th>
-                    <th>Assignee</th>
-                    <th>Priority</th>
-                  </tr>
-                </thead>
-                <tbody id="momActionItemsTbody">
-                  <tr>
-                    <td colspan="4" class="text-center text-muted">No action items logged yet.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Discussion Topics Breakdown -->
-          <div class="mom-section-card">
-            <h3><i class="fa-solid fa-comments"></i> Agenda Topics Breakdown</h3>
-            <div id="momTopicsContainer" class="topics-timeline">
-              <p class="text-muted">Topics will be structured as speech progresses.</p>
-            </div>
-          </div>
-
+        <div class="footer-stats">
+          <span id="detectionSpeedNotice"><i class="fa-solid fa-bolt"></i> Low-latency speech stream</span>
         </div>
-      </section>
-
-    </div>
+      </div>
+    </section>
   </main>
+
+  <!-- MOM (MINUTES OF MEETING) MODAL DIALOG -->
+  <div id="momModal" class="mom-modal-overlay">
+    <div class="mom-modal-card" id="printableMomArea">
+      <!-- Modal Header -->
+      <div class="mom-modal-header">
+        <div class="mom-modal-title">
+          <i class="fa-solid fa-file-signature"></i>
+          <h2>Minutes of Meeting (MOM)</h2>
+        </div>
+        <div class="mom-modal-actions">
+          <button id="copyMomBtn" class="btn btn-sm btn-outline" title="Copy full MOM markdown"><i class="fa-solid fa-copy"></i> Copy MOM</button>
+          <button id="exportMdBtn" class="btn btn-sm btn-outline" title="Download MOM as Markdown"><i class="fa-solid fa-file-code"></i> Save .md</button>
+          <button id="exportPdfBtn" class="btn btn-sm btn-outline" title="Print or save as PDF"><i class="fa-solid fa-print"></i> Print / PDF</button>
+          <button id="closeMomModalBtn" class="modal-close-btn" title="Close MOM view"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
+      <!-- MOM Setup Inputs -->
+      <div class="mom-meta-row">
+        <div class="mom-meta-input">
+          <label><i class="fa-solid fa-heading"></i> Meeting Title:</label>
+          <input type="text" id="momTitleInput" value="Executive Sync & Roadmap Discussion">
+        </div>
+        <div class="mom-meta-input">
+          <label><i class="fa-solid fa-users"></i> Attendees:</label>
+          <input type="text" id="momAttendeesInput" value="Alex (Host), Dev Lead, Product Manager, Meeting Attendees">
+        </div>
+        <button id="refreshMomBtn" class="btn btn-sm btn-accent" title="Re-analyze text and refresh MOM">
+          <i class="fa-solid fa-arrows-rotate"></i> Re-generate MOM
+        </button>
+      </div>
+
+      <!-- MOM Content Scroll Area -->
+      <div class="mom-modal-body">
+        <!-- Executive Summary -->
+        <div class="mom-section-card">
+          <h3><i class="fa-solid fa-align-left"></i> Executive Summary</h3>
+          <p id="momExecutiveSummary" class="mom-summary-text">
+            Generating executive summary from transcribed meeting text...
+          </p>
+        </div>
+
+        <!-- Key Decisions Made -->
+        <div class="mom-section-card">
+          <h3><i class="fa-solid fa-circle-check"></i> Key Decisions Made</h3>
+          <ul id="momDecisionsList" class="mom-list decisions-list">
+            <li class="empty-item">Analyzing transcript for key decisions...</li>
+          </ul>
+        </div>
+
+        <!-- Action Items Table -->
+        <div class="mom-section-card">
+          <div class="section-title-row">
+            <h3><i class="fa-solid fa-list-check"></i> Action Items & Owners</h3>
+            <button id="addManualActionBtn" class="btn-text-sm"><i class="fa-solid fa-plus"></i> Add Action Item</button>
+          </div>
+          <div class="table-responsive">
+            <table class="action-items-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px;">Status</th>
+                  <th>Task Description</th>
+                  <th style="width: 160px;">Assignee</th>
+                  <th style="width: 100px;">Priority</th>
+                </tr>
+              </thead>
+              <tbody id="momActionItemsTbody">
+                <tr>
+                  <td colspan="4" class="text-center text-muted">Analyzing action items from speech...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Discussion Topics Breakdown -->
+        <div class="mom-section-card">
+          <h3><i class="fa-solid fa-comments"></i> Agenda Topics Breakdown</h3>
+          <div id="momTopicsContainer" class="topics-timeline">
+            <p class="text-muted">Analyzing topic structure from speech...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Device Audio Guidance Help Modal -->
+  <div id="deviceAudioModal" class="guide-modal-overlay">
+    <div class="guide-modal-card">
+      <div class="guide-modal-header">
+        <div class="guide-modal-title">
+          <i class="fa-solid fa-laptop-code"></i>
+          <h3>How to Capture Device & Meeting Audio</h3>
+        </div>
+        <button id="closeGuideModalBtn" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="guide-modal-body">
+        <p class="guide-intro">To transcribe speech from other attendees in <strong>Google Meet, Zoom, Microsoft Teams, YouTube</strong>, or any app playing sound on your device:</p>
+        
+        <div class="guide-step">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            <strong>Choose Audio Source</strong>:
+            <p>Select <em>"Both: Mic + Device Audio"</em> (captures you + meeting attendees) or <em>"Device Audio Only"</em>.</p>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            <strong>Click "Start Listening"</strong>:
+            <p>Your browser will show a sharing selection prompt.</p>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            <strong>Enable Audio Sharing</strong>:
+            <p>• If sharing a <strong>Chrome/Edge Tab</strong> (e.g. Google Meet / YouTube): Ensure <strong>"Share tab audio"</strong> is checked.<br>
+            • If sharing <strong>Entire Screen</strong> (e.g. Zoom or Teams desktop app): Turn on <strong>"Also share system audio"</strong> toggle at the bottom.</p>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="step-num">4</div>
+          <div class="step-text">
+            <strong>Real-Time Detection & MOM</strong>:
+            <p>Both your voice and incoming meeting speech will stream directly into the text box. When finished, click <strong>"Prepare MOM"</strong> to generate your meeting minutes!</p>
+          </div>
+        </div>
+      </div>
+      <div class="guide-modal-footer">
+        <button id="guideGotItBtn" class="btn btn-primary">Got it, let's start!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="toast-notification">
+    <i class="fa-solid fa-circle-check"></i>
+    <span id="toastMessage">Action completed!</span>
+  </div>
 
   <script src="app.js"></script>
 </body>

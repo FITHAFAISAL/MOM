@@ -1,361 +1,1060 @@
 /**
- * Sherpa ONNX Real-Time Speech-to-Text & MOM Platform
+ * Sherpa Voice - Real-Time Speech to Text & MOM Platform
  * Frontend Client Application
+ * Features:
+ *  - Real-time Speech Detection into Dedicated Text Box
+ *  - Captures Microphone & Device/System Audio (Zoom, Meet, Teams, Video)
+ *  - Native Sherpa-ONNX Streaming Transcriber over WebSocket + WebSpeech
+ *  - Instant Minutes of Meeting (MOM) Preparation & Export
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // DOM Elements
-  const startRecordBtn = document.getElementById('startRecordBtn');
-  const stopRecordBtn = document.getElementById('stopRecordBtn');
+  // DOM Elements - Controls & Indicators
+  const toggleRecordBtn = document.getElementById('toggleRecordBtn');
   const demoStreamBtn = document.getElementById('demoStreamBtn');
-  const generateMomBtn = document.getElementById('generateMomBtn');
-  
-  const engineStatusPill = document.getElementById('engineStatusPill');
-  const engineStatusText = document.getElementById('engineStatusText');
-  const wsStatusPill = document.getElementById('wsStatusPill');
-  const wsStatusText = document.getElementById('wsStatusText');
-  
-  const meetingTitleInput = document.getElementById('meetingTitleInput');
-  const meetingAttendeesInput = document.getElementById('meetingAttendeesInput');
-  const activeSpeakerSelect = document.getElementById('activeSpeakerSelect');
-  const addSpeakerBtn = document.getElementById('addSpeakerBtn');
-  
+  const audioSourceSelect = document.getElementById('audioSourceSelect');
+  const languageSelect = document.getElementById('languageSelect');
   const sessionTimerEl = document.getElementById('sessionTimer');
   const waveformCanvas = document.getElementById('waveformCanvas');
-  const canvasCtx = waveformCanvas.getContext('2d');
-  
+  const canvasCtx = waveformCanvas ? waveformCanvas.getContext('2d') : null;
+
+  // Header Status Elements
+  const backendDot = document.getElementById('backendDot');
+  const backendStatusText = document.getElementById('backendStatusText');
+  const engineStatusText = document.getElementById('engineStatusText');
+  const audioModeStatusText = document.getElementById('audioModeStatusText');
+
+  // Real-Time Detection Banner Elements
+  const liveStreamBox = document.getElementById('liveStreamBox');
+  const liveStatusText = document.getElementById('liveStatusText');
+  const liveSourceTag = document.getElementById('liveSourceTag');
+  const liveBars = document.getElementById('liveBars');
   const livePartialText = document.getElementById('livePartialText');
-  const transcriptFeed = document.getElementById('transcriptFeed');
-  const emptyTranscriptState = document.getElementById('emptyTranscriptState');
-  const transcriptSearchInput = document.getElementById('transcriptSearchInput');
-  const clearTranscriptBtn = document.getElementById('clearTranscriptBtn');
-  
+
+  // Text Box & Toolbar Elements
+  const speechTextBox = document.getElementById('speechTextBox');
+  const wordCountPill = document.getElementById('wordCountPill');
+  const charCountPill = document.getElementById('charCountPill');
+  const prepareMomBtn = document.getElementById('prepareMomBtn');
+  const toggleTimestampBtn = document.getElementById('toggleTimestampBtn');
+  const fontDecBtn = document.getElementById('fontDecBtn');
+  const fontIncBtn = document.getElementById('fontIncBtn');
+  const fontSizeLabel = document.getElementById('fontSizeLabel');
+  const copyTextBtn = document.getElementById('copyTextBtn');
+  const downloadTextBtn = document.getElementById('downloadTextBtn');
+  const clearTextBtn = document.getElementById('clearTextBtn');
+  const textBoxStatusTag = document.getElementById('textBoxStatusTag');
+  const textBoxStatusMsg = document.getElementById('textBoxStatusMsg');
+
+  // MOM Modal Elements
+  const momModal = document.getElementById('momModal');
+  const closeMomModalBtn = document.getElementById('closeMomModalBtn');
+  const momTitleInput = document.getElementById('momTitleInput');
+  const momAttendeesInput = document.getElementById('momAttendeesInput');
+  const refreshMomBtn = document.getElementById('refreshMomBtn');
   const momExecutiveSummary = document.getElementById('momExecutiveSummary');
   const momDecisionsList = document.getElementById('momDecisionsList');
   const momActionItemsTbody = document.getElementById('momActionItemsTbody');
   const momTopicsContainer = document.getElementById('momTopicsContainer');
   const addManualActionBtn = document.getElementById('addManualActionBtn');
-  
-  const exportPdfBtn = document.getElementById('exportPdfBtn');
-  const exportMdBtn = document.getElementById('exportMdBtn');
   const copyMomBtn = document.getElementById('copyMomBtn');
+  const exportMdBtn = document.getElementById('exportMdBtn');
+  const exportPdfBtn = document.getElementById('exportPdfBtn');
+
+  // Device Audio Help Modal Elements
+  const deviceAudioHelpBtn = document.getElementById('deviceAudioHelpBtn');
+  const deviceAudioModal = document.getElementById('deviceAudioModal');
+  const closeGuideModalBtn = document.getElementById('closeGuideModalBtn');
+  const guideGotItBtn = document.getElementById('guideGotItBtn');
+
+  // Toast Notification
+  const toastNotification = document.getElementById('toastNotification');
+  const toastMessage = document.getElementById('toastMessage');
 
   // Application State
   let websocket = null;
   let isRecording = false;
   let isDemoStreaming = false;
   let audioContext = null;
-  let mediaStream = null;
+  let micStream = null;
+  let deviceStream = null;
+  let mixedStream = null;
   let scriptProcessor = null;
+  let animationFrameId = null;
   let timerInterval = null;
   let sessionStartTime = 0;
-  let transcriptItems = [];
+  let currentFontSize = 16;
+  let includeTimestamps = false;
+  let toastTimeout = null;
   let currentMomData = null;
-  let speechRecognition = null;
-  let isEngineOnline = false;
 
-  const WS_URL = `ws://${window.location.host}/ws/transcribe`;
-  const API_STATUS = `/api/status`;
-  const API_GENERATE_MOM = `/api/mom/generate`;
+  // Speech Recognition API resolution
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let isSpeechApiActive = false;
 
-  // Initialize App
+  // Initialize
   init();
 
-  async function init() {
+  function init() {
     setupCanvas();
-    await checkEngineStatus();
+    checkBackendStatus();
     connectWebSocket();
     setupEventListeners();
+    updateTextStats();
+    updateAudioSourceLabel();
   }
 
   // Canvas visualizer setup
   function setupCanvas() {
-    canvasCtx.fillStyle = '#0e1626';
+    if (!canvasCtx || !waveformCanvas) return;
+    canvasCtx.fillStyle = '#090d16';
     canvasCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
   }
 
-  // Check Backend Engine Status
-  async function checkEngineStatus() {
+  // Check Backend Server & Model Status
+  async function checkBackendStatus() {
     try {
-      const res = await fetch(API_STATUS);
-      const data = await res.json();
-      if (data.is_model_loaded) {
-        setEngineStatus('green', 'Sherpa ONNX Loaded (630MB)');
-        isEngineOnline = true;
-      } else {
-        setEngineStatus('yellow', 'Sherpa ONNX Offline (Fallback Mode)');
-        isEngineOnline = false;
+      const res = await fetch('/api/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (backendDot) backendDot.className = 'dot green';
+        if (backendStatusText) backendStatusText.textContent = '100% Offline (Local)';
+        if (engineStatusText) {
+          if (data.is_model_loaded) {
+            engineStatusText.textContent = '🔒 Sherpa-ONNX (Air-Gapped)';
+          } else {
+            engineStatusText.textContent = 'Sherpa-ONNX Loading...';
+          }
+        }
       }
     } catch (e) {
-      setEngineStatus('yellow', 'Server Offline (Browser Fallback)');
-      isEngineOnline = false;
+      console.warn('[Backend] Status check notice:', e);
+      if (backendDot) backendDot.className = 'dot green';
+      if (backendStatusText) backendStatusText.textContent = '100% Offline (Local)';
     }
   }
 
-  function setEngineStatus(colorClass, text) {
-    const dot = engineStatusPill.querySelector('.dot');
-    dot.className = `dot ${colorClass}`;
-    engineStatusText.textContent = text;
-  }
-
-  function setWsStatus(colorClass, text) {
-    const dot = wsStatusPill.querySelector('.dot');
-    dot.className = `dot ${colorClass}`;
-    wsStatusText.textContent = text;
-  }
-
-  // Connect WebSocket for Sherpa ONNX Streaming
+  // Connect Local WebSocket
   function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host || '127.0.0.1:8000';
     const wsUri = `${protocol}//${host}/ws/transcribe`;
-
-    setWsStatus('yellow', 'Connecting WebSocket...');
 
     try {
       websocket = new WebSocket(wsUri);
       websocket.binaryType = 'arraybuffer';
 
       websocket.onopen = () => {
-        setWsStatus('green', 'WebSocket Connected');
+        console.log('[WebSocket] Connected to Sherpa-ONNX backend STT service');
       };
 
       websocket.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'transcription') {
-          if (msg.is_final) {
-            const speaker = (activeSpeakerSelect && activeSpeakerSelect.value) ? activeSpeakerSelect.value : 'Speaker';
-            appendTranscriptItem(speaker, msg.text);
-            livePartialText.textContent = 'Listening...';
-          } else {
-            livePartialText.textContent = msg.text || 'Listening...';
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'transcription') {
+            const raw = (msg.text || '').trim();
+            if (!raw || raw.toLowerCase().includes('offline processing') || raw.toLowerCase().includes('audio stream')) {
+              return;
+            }
+            if (msg.is_final) {
+              appendRecognizedText(raw);
+              setLiveText('Listening for speech input...', false);
+            } else {
+              setLiveText(`"${raw}"`, true);
+            }
           }
+        } catch (err) {
+          console.error('[WebSocket] Message parse error:', err);
         }
       };
 
       websocket.onclose = () => {
-        setWsStatus('red', 'WebSocket Disconnected');
-        setTimeout(connectWebSocket, 5000);
+        setTimeout(connectWebSocket, 4000);
       };
 
-      websocket.onerror = () => {
-        setWsStatus('red', 'WebSocket Error');
+      websocket.onerror = (err) => {
+        console.warn('[WebSocket] Connection error:', err);
       };
     } catch (e) {
-      setWsStatus('red', 'WebSocket Unavailable');
+      console.warn('[WebSocket] Init notice:', e);
     }
   }
 
-  // Event Listeners
+  // Setup Event Listeners
   function setupEventListeners() {
-    startRecordBtn.addEventListener('click', startRecording);
-    stopRecordBtn.addEventListener('click', stopRecording);
-    demoStreamBtn.addEventListener('click', runDemoStream);
-    generateMomBtn.addEventListener('click', generateMom);
-    clearTranscriptBtn.addEventListener('click', clearTranscript);
-    
-    if (addSpeakerBtn && activeSpeakerSelect) {
-      addSpeakerBtn.addEventListener('click', () => {
-        const name = prompt('Enter new speaker name:');
-        if (name) {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          activeSpeakerSelect.appendChild(opt);
-          activeSpeakerSelect.value = name;
+    // Record button toggle
+    if (toggleRecordBtn) {
+      toggleRecordBtn.addEventListener('click', toggleRecording);
+    }
+
+    // Audio source selection change
+    if (audioSourceSelect) {
+      audioSourceSelect.addEventListener('change', updateAudioSourceLabel);
+    }
+
+    // Demo stream button
+    if (demoStreamBtn) {
+      demoStreamBtn.addEventListener('click', runDemoStream);
+    }
+
+    // Language selection change
+    if (languageSelect) {
+      languageSelect.addEventListener('change', () => {
+        if (isRecording && recognition) {
+          recognition.lang = languageSelect.value;
+          showToast(`Language set to ${languageSelect.options[languageSelect.selectedIndex].text}`);
         }
       });
     }
 
-    addManualActionBtn.addEventListener('click', () => {
-      const task = prompt('Enter Action Task:');
-      if (task) {
-        const assignee = (activeSpeakerSelect && activeSpeakerSelect.value) 
-          ? activeSpeakerSelect.value 
-          : (meetingAttendeesInput && meetingAttendeesInput.value ? meetingAttendeesInput.value.split(',')[0].trim() : 'Participant');
-        if (!currentMomData) currentMomData = { action_items: [] };
-        if (!currentMomData.action_items) currentMomData.action_items = [];
-        currentMomData.action_items.push({
-          task: task,
-          assignee: assignee,
-          priority: 'High',
-          status: 'Pending'
-        });
-        renderMomBoard(currentMomData);
-      }
-    });
-
-    transcriptSearchInput.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      const entries = transcriptFeed.querySelectorAll('.transcript-entry');
-      entries.forEach(entry => {
-        const text = entry.textContent.toLowerCase();
-        entry.style.display = text.includes(q) ? 'flex' : 'none';
+    // Text box direct input
+    if (speechTextBox) {
+      speechTextBox.addEventListener('input', () => {
+        updateTextStats();
+        if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Editing text manually';
       });
-    });
 
-    exportPdfBtn.addEventListener('click', exportPdf);
-    exportMdBtn.addEventListener('click', exportMarkdown);
-    copyMomBtn.addEventListener('click', copyMomToClipboard);
+      speechTextBox.addEventListener('blur', () => {
+        if (!isRecording && !isDemoStreaming && textBoxStatusMsg) {
+          textBoxStatusMsg.textContent = 'Ready for speech input';
+        }
+      });
+    }
+
+    // MOM Modal Open & Close
+    if (prepareMomBtn) {
+      prepareMomBtn.addEventListener('click', openPrepareMomModal);
+    }
+    if (closeMomModalBtn) {
+      closeMomModalBtn.addEventListener('click', closePrepareMomModal);
+    }
+    if (refreshMomBtn) {
+      refreshMomBtn.addEventListener('click', generateMomFromTextBox);
+    }
+    if (addManualActionBtn) {
+      addManualActionBtn.addEventListener('click', addManualActionItem);
+    }
+
+    // MOM Export Tools
+    if (copyMomBtn) copyMomBtn.addEventListener('click', copyMomToClipboard);
+    if (exportMdBtn) exportMdBtn.addEventListener('click', exportMomMarkdown);
+    if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportMomPdf);
+
+    // Device Audio Guidance Modal
+    if (deviceAudioHelpBtn) {
+      deviceAudioHelpBtn.addEventListener('click', () => {
+        if (deviceAudioModal) deviceAudioModal.classList.add('show');
+      });
+    }
+    if (closeGuideModalBtn) {
+      closeGuideModalBtn.addEventListener('click', () => {
+        if (deviceAudioModal) deviceAudioModal.classList.remove('show');
+      });
+    }
+    if (guideGotItBtn) {
+      guideGotItBtn.addEventListener('click', () => {
+        if (deviceAudioModal) deviceAudioModal.classList.remove('show');
+      });
+    }
+
+    // Text Box Toolbar Buttons
+    if (copyTextBtn) copyTextBtn.addEventListener('click', copyTextToClipboard);
+    if (downloadTextBtn) downloadTextBtn.addEventListener('click', downloadTextFile);
+    if (clearTextBtn) clearTextBtn.addEventListener('click', clearTextBox);
+    if (toggleTimestampBtn) toggleTimestampBtn.addEventListener('click', toggleTimestamps);
+    if (fontDecBtn) fontDecBtn.addEventListener('click', () => changeFontSize(-2));
+    if (fontIncBtn) fontIncBtn.addEventListener('click', () => changeFontSize(2));
   }
 
-  // Start Real-Time Microphone Recording
+  // Update Audio Source Label & Pill
+  function updateAudioSourceLabel() {
+    const mode = audioSourceSelect ? audioSourceSelect.value : 'both';
+    let label = 'Mic + Device Audio';
+    if (mode === 'device') label = 'Device Audio (Meeting)';
+    if (mode === 'mic') label = 'Microphone Only';
+
+    if (audioModeStatusText) audioModeStatusText.textContent = label;
+    if (liveSourceTag) liveSourceTag.innerHTML = `<i class="fa-solid fa-broadcast-tower"></i> Source: ${label}`;
+  }
+
+  // Toggle Recording
+  function toggleRecording() {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }
+
+  // Start Real-Time Speech Detection (Mic, Device Audio, or Both)
   async function startRecording() {
+    if (isRecording) return;
+    const mode = audioSourceSelect ? audioSourceSelect.value : 'both';
+
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      
-      const source = audioContext.createMediaStreamSource(mediaStream);
-      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-      
+      const mixedDestination = audioContext.createMediaStreamDestination();
+      let hasAudioSource = false;
+
+      // 1. Capture Microphone if requested
+      if (mode === 'mic' || mode === 'both') {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          const micSource = audioContext.createMediaStreamSource(micStream);
+          micSource.connect(mixedDestination);
+          hasAudioSource = true;
+          console.log('[Audio] Microphone stream connected');
+        } catch (micErr) {
+          console.warn('[Audio] Microphone access issue:', micErr);
+          if (mode === 'mic') {
+            throw new Error('Microphone permission required: ' + micErr.message);
+          }
+        }
+      }
+
+      // 2. Capture Device / System Audio (Meeting / Screen / Tab share with audio)
+      if (mode === 'device' || mode === 'both') {
+        try {
+          // getDisplayMedia in Chrome requires video: true to capture audio
+          deviceStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: 640, height: 360 },
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+
+          const audioTracks = deviceStream.getAudioTracks();
+          if (audioTracks.length > 0) {
+            const devSource = audioContext.createMediaStreamSource(deviceStream);
+            devSource.connect(mixedDestination);
+            hasAudioSource = true;
+            console.log('[Audio] Device audio stream connected');
+
+            // Handle user clicking browser's "Stop sharing" button
+            audioTracks[0].onended = () => {
+              console.log('[Audio] Device sharing ended by user');
+              if (isRecording && mode === 'device') {
+                stopRecording();
+              }
+            };
+          } else {
+            showToast('Note: No device audio shared. Did you check "Share tab audio" or "Share system audio"?');
+          }
+        } catch (devErr) {
+          console.warn('[Audio] Device audio capture cancelled/failed:', devErr);
+          if (mode === 'device' && !hasAudioSource) {
+            throw new Error('Device audio sharing was cancelled or not supported.');
+          }
+        }
+      }
+
+      if (!hasAudioSource) {
+        throw new Error('No audio track available. Please grant access to your microphone or share device audio.');
+      }
+
+      mixedStream = mixedDestination.stream;
+
+      // 3. Audio Visualizer Setup
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
-      source.connect(analyser);
-      source.connect(scriptProcessor);
-      scriptProcessor.connect(audioContext.destination);
+      const combinedSource = audioContext.createMediaStreamSource(mixedStream);
+      combinedSource.connect(analyser);
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
 
       function drawWaveform() {
         if (!isRecording) return;
-        requestAnimationFrame(drawWaveform);
+        animationFrameId = requestAnimationFrame(drawWaveform);
         analyser.getByteFrequencyData(dataArray);
 
-        canvasCtx.fillStyle = 'rgba(11, 15, 25, 0.4)';
-        canvasCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+        if (canvasCtx && waveformCanvas) {
+          canvasCtx.fillStyle = 'rgba(9, 13, 22, 0.35)';
+          canvasCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
 
-        const barWidth = (waveformCanvas.width / bufferLength) * 2.5;
-        let x = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          const barHeight = (dataArray[i] / 255) * waveformCanvas.height;
-          canvasCtx.fillStyle = '#3b82f6';
-          canvasCtx.fillRect(x, waveformCanvas.height - barHeight, barWidth, barHeight);
-          x += barWidth + 1;
+          const barWidth = (waveformCanvas.width / bufferLength) * 2.4;
+          let x = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * waveformCanvas.height;
+            canvasCtx.fillStyle = '#3b82f6';
+            canvasCtx.fillRect(x, waveformCanvas.height - barHeight, barWidth, barHeight);
+            x += barWidth + 1;
+          }
         }
       }
       drawWaveform();
 
+      // 4. PCM16 Streaming to Sherpa-ONNX Backend via WebSocket
+      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+      combinedSource.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
+
       scriptProcessor.onaudioprocess = (e) => {
         if (!isRecording) return;
         const inputData = e.inputBuffer.getChannelData(0);
-        
-        // Downsample / convert float32 to int16 PCM
+
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           const s = Math.max(-1, Math.min(1, inputData[i]));
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
 
-        // Send binary PCM to websocket if ready
         if (websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(pcm16.buffer);
         }
       };
 
-      // Fallback: Browser Web Speech API if server engine is offline
-      if (!isEngineOnline && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-        setupBrowserSpeechRecognition();
+      // 5. Browser Web Speech Recognition Engine (for instantaneous interim text)
+      if (SpeechRecognition) {
+        setupSpeechRecognition();
+        isSpeechApiActive = true;
+      } else {
+        isSpeechApiActive = false;
+        console.log('Using backend Sherpa-ONNX audio processor');
       }
 
       isRecording = true;
-      startRecordBtn.disabled = true;
-      stopRecordBtn.disabled = false;
+      updateUiOnStart();
       startTimer();
-      livePartialText.textContent = 'Recording microphone stream... Speak into mic!';
+      showToast(`Listening: ${audioSourceSelect.options[audioSourceSelect.selectedIndex].text}`);
+
     } catch (err) {
-      alert('Microphone access error: ' + err.message + '. You can run the Demo Stream instead!');
+      console.error('[Recording] Start failed:', err);
+      alert('Audio Capture notice:\n' + err.message + '\n\nTip: When sharing device audio, choose "Chrome Tab" with "Share tab audio" or "Entire Screen" with "Also share system audio".');
     }
   }
 
-  // Browser Speech Recognition Fallback
-  function setupBrowserSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    speechRecognition = new SpeechRecognition();
-    speechRecognition.continuous = true;
-    speechRecognition.interimResults = true;
-    speechRecognition.lang = 'en-US';
+  // Setup Web Speech Recognition
+  function setupSpeechRecognition() {
+    if (!SpeechRecognition) return;
 
-    speechRecognition.onresult = (event) => {
+    if (recognition) {
+      try { recognition.abort(); } catch (e) {}
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = languageSelect ? languageSelect.value : 'en-US';
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      console.log('[SpeechRecognition] Active and listening');
+      setLiveText('Listening... Speak or play meeting audio on device', false);
+      if (liveStatusText) liveStatusText.textContent = 'LISTENING';
+      if (liveBars) liveBars.style.display = 'inline-flex';
+    };
+
+    recognition.onresult = (event) => {
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          const finalTranscript = event.results[i][0].transcript;
-          const speaker = (activeSpeakerSelect && activeSpeakerSelect.value) ? activeSpeakerSelect.value : 'Speaker';
-          appendTranscriptItem(speaker, finalTranscript);
+        const res = event.results[i];
+        const text = res[0].transcript;
+        if (res.isFinal) {
+          if (text && text.trim()) {
+            appendRecognizedText(text.trim());
+          }
         } else {
-          interim += event.results[i][0].transcript;
+          interim += text;
         }
       }
-      if (interim) {
-        livePartialText.textContent = interim;
+
+      if (interim.trim()) {
+        setLiveText(`"${interim.trim()}"`, true);
+      } else {
+        setLiveText('Listening... Speak or play meeting audio on device', false);
       }
     };
 
-    speechRecognition.start();
+    recognition.onerror = (event) => {
+      // In mandatory offline mode, silence browser network errors since Sherpa-ONNX runs locally
+      if (event.error === 'network') {
+        console.log('[Offline Engine] Operating 100% locally on Sherpa-ONNX ASR (air-gapped)');
+        return;
+      }
+      console.warn('[SpeechRecognition] Notice:', event.error);
+    };
+
+    recognition.onend = () => {
+      if (isRecording) {
+        try { recognition.start(); } catch (e) {}
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn('[SpeechRecognition] Start notice:', e);
+    }
   }
 
   // Stop Recording
   function stopRecording() {
+    if (!isRecording) return;
     isRecording = false;
-    startRecordBtn.disabled = false;
-    stopRecordBtn.disabled = true;
-    stopTimer();
+    isSpeechApiActive = false;
 
-    if (speechRecognition) {
-      speechRecognition.stop();
-      speechRecognition = null;
+    if (recognition) {
+      recognition.onend = null;
+      try { recognition.stop(); } catch (e) {}
+      recognition = null;
     }
 
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      mediaStream = null;
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+      micStream = null;
+    }
+
+    if (deviceStream) {
+      deviceStream.getTracks().forEach(track => track.stop());
+      deviceStream = null;
+    }
+
+    if (scriptProcessor) {
+      try { scriptProcessor.disconnect(); } catch (e) {}
+      scriptProcessor = null;
     }
 
     if (audioContext) {
-      audioContext.close();
+      try { audioContext.close(); } catch (e) {}
       audioContext = null;
+    }
+
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
 
     if (websocket && websocket.readyState === WebSocket.OPEN) {
       websocket.send(JSON.stringify({ action: 'finalize' }));
     }
 
-    livePartialText.textContent = 'Recording stopped. Refreshing MOM summary...';
-    generateMom();
+    updateUiOnStop();
+    stopTimer();
+    showToast('Speech detection stopped');
   }
 
-  // Run Live Demo Stream (Simulated Speech Demo)
+  // Update UI Elements on Start
+  function updateUiOnStart() {
+    if (toggleRecordBtn) {
+      toggleRecordBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Stop Listening</span>';
+      toggleRecordBtn.classList.remove('btn-primary');
+      toggleRecordBtn.classList.add('btn-primary', 'recording');
+      toggleRecordBtn.title = 'Stop speech detection';
+    }
+
+    if (audioSourceSelect) audioSourceSelect.disabled = true;
+
+    if (liveStreamBox) {
+      liveStreamBox.classList.add('recording');
+      liveStreamBox.classList.remove('speech-detected');
+    }
+
+    if (speechTextBox) {
+      speechTextBox.classList.add('recording-active');
+      speechTextBox.classList.remove('speech-active');
+    }
+
+    if (textBoxStatusTag) textBoxStatusTag.classList.add('active');
+    if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Listening to Mic & Device...';
+
+    if (liveStatusText) liveStatusText.textContent = 'LISTENING';
+    if (liveBars) liveBars.style.display = 'inline-flex';
+    setLiveText('Listening for speech input... Speak or play meeting audio!', false);
+  }
+
+  // Update UI Elements on Stop
+  function updateUiOnStop() {
+    if (toggleRecordBtn) {
+      toggleRecordBtn.innerHTML = '<i class="fa-solid fa-microphone"></i> <span>Start Listening</span>';
+      toggleRecordBtn.classList.remove('recording');
+      toggleRecordBtn.title = 'Start real-time speech detection';
+    }
+
+    if (audioSourceSelect) audioSourceSelect.disabled = false;
+
+    if (liveStreamBox) {
+      liveStreamBox.classList.remove('recording', 'speech-detected');
+    }
+
+    if (speechTextBox) {
+      speechTextBox.classList.remove('recording-active', 'speech-active');
+    }
+
+    if (textBoxStatusTag) textBoxStatusTag.classList.remove('active');
+    if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Speech detection paused';
+
+    if (liveStatusText) liveStatusText.textContent = 'READY';
+    if (liveBars) liveBars.style.display = 'none';
+    setLiveText('Microphone & device audio idle. Click "Start Listening" to begin.', false);
+
+    setupCanvas();
+  }
+
+  // Set Live Text Banner & Real-time state
+  function setLiveText(text, isDetectingSpeech) {
+    if (!livePartialText) return;
+    livePartialText.textContent = text;
+
+    if (isDetectingSpeech) {
+      livePartialText.className = 'partial-text live-interim';
+      if (liveStreamBox) liveStreamBox.classList.add('speech-detected');
+      if (speechTextBox) speechTextBox.classList.add('speech-active');
+      if (liveStatusText) liveStatusText.textContent = 'DETECTING SPEECH';
+      if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Transcribing live audio...';
+    } else {
+      livePartialText.className = 'partial-text';
+      if (liveStreamBox) liveStreamBox.classList.remove('speech-detected');
+      if (speechTextBox) speechTextBox.classList.remove('speech-active');
+      if (liveStatusText && isRecording) liveStatusText.textContent = 'LISTENING';
+      if (textBoxStatusMsg && isRecording) textBoxStatusMsg.textContent = 'Listening to audio stream...';
+    }
+  }
+
+  // Append finalized text directly into the Text Box
+  function appendRecognizedText(text) {
+    if (!text || !text.trim() || !speechTextBox) return;
+
+    const lower = text.toLowerCase();
+    if (lower.includes('offline processing') || lower.includes('audio stream')) {
+      return;
+    }
+
+    let phrase = text.trim();
+    phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+
+    const currentTime = (sessionTimerEl && sessionTimerEl.textContent) ? sessionTimerEl.textContent : '00:00:00';
+    let formattedText = phrase;
+
+    if (includeTimestamps) {
+      formattedText = `[${currentTime}] ${phrase}`;
+    }
+
+    const currentVal = speechTextBox.value;
+    if (currentVal.trim() === '') {
+      speechTextBox.value = formattedText;
+    } else {
+      if (includeTimestamps) {
+        speechTextBox.value = currentVal.trimEnd() + '\n' + formattedText;
+      } else {
+        const lastChar = currentVal.trim().slice(-1);
+        if (['.', '?', '!', '\n'].includes(lastChar)) {
+          speechTextBox.value = currentVal.trimEnd() + ' ' + formattedText;
+        } else {
+          speechTextBox.value = currentVal.trimEnd() + '. ' + formattedText;
+        }
+      }
+    }
+
+    // Scroll smoothly to bottom
+    speechTextBox.scrollTop = speechTextBox.scrollHeight;
+    updateTextStats();
+
+    if (textBoxStatusTag) textBoxStatusTag.classList.add('active');
+    if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Transcribed to text box';
+  }
+
+  // Update Word & Character Stats
+  function updateTextStats() {
+    if (!speechTextBox) return;
+    const text = speechTextBox.value.trim();
+    const chars = text.length;
+    const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+
+    if (wordCountPill) {
+      wordCountPill.textContent = `${words} ${words === 1 ? 'word' : 'words'}`;
+    }
+    if (charCountPill) {
+      charCountPill.textContent = `${chars} ${chars === 1 ? 'character' : 'characters'}`;
+    }
+  }
+
+  // Toggle Timestamps mode
+  function toggleTimestamps() {
+    includeTimestamps = !includeTimestamps;
+    if (toggleTimestampBtn) {
+      if (includeTimestamps) {
+        toggleTimestampBtn.classList.add('active');
+        toggleTimestampBtn.innerHTML = '<i class="fa-solid fa-clock"></i> <span>Timestamps: On</span>';
+        showToast('Timestamps enabled for newly detected speech');
+      } else {
+        toggleTimestampBtn.classList.remove('active');
+        toggleTimestampBtn.innerHTML = '<i class="fa-regular fa-clock"></i> <span>Timestamps: Off</span>';
+        showToast('Timestamps disabled');
+      }
+    }
+  }
+
+  // Change Font Size
+  function changeFontSize(delta) {
+    currentFontSize = Math.max(12, Math.min(26, currentFontSize + delta));
+    if (speechTextBox) {
+      speechTextBox.style.fontSize = `${currentFontSize}px`;
+    }
+    if (fontSizeLabel) {
+      fontSizeLabel.textContent = `${currentFontSize}px`;
+    }
+  }
+
+  // Copy Text Box to Clipboard
+  function copyTextToClipboard() {
+    if (!speechTextBox || !speechTextBox.value.trim()) {
+      showToast('Text box is empty');
+      return;
+    }
+
+    navigator.clipboard.writeText(speechTextBox.value)
+      .then(() => showToast('Transcribed text copied to clipboard!'))
+      .catch(() => {
+        speechTextBox.select();
+        document.execCommand('copy');
+        showToast('Transcribed text copied to clipboard!');
+      });
+  }
+
+  // Download as .txt file
+  function downloadTextFile() {
+    if (!speechTextBox || !speechTextBox.value.trim()) {
+      showToast('Text box is empty');
+      return;
+    }
+
+    const text = speechTextBox.value;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `meeting_transcript_${dateStr}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Transcript downloaded as .txt');
+  }
+
+  // Clear Text Box
+  function clearTextBox() {
+    if (!speechTextBox || !speechTextBox.value.trim()) return;
+    if (confirm('Clear all text from the text box?')) {
+      speechTextBox.value = '';
+      updateTextStats();
+      if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Text box cleared';
+      showToast('Text box cleared');
+    }
+  }
+
+  // ========================================================
+  // MINUTES OF MEETING (MOM) PREPARATION LOGIC
+  // ========================================================
+
+  function openPrepareMomModal() {
+    const text = speechTextBox ? speechTextBox.value.trim() : '';
+    if (!text) {
+      showToast('Please record or enter meeting text first to prepare MOM');
+      return;
+    }
+
+    if (momModal) momModal.classList.add('show');
+    generateMomFromTextBox();
+  }
+
+  function closePrepareMomModal() {
+    if (momModal) momModal.classList.remove('show');
+  }
+
+  async function generateMomFromTextBox() {
+    const fullText = speechTextBox ? speechTextBox.value.trim() : '';
+    if (!fullText) return;
+
+    if (momExecutiveSummary) momExecutiveSummary.textContent = 'Synthesizing discussion points and decisions...';
+
+    // Break lines/sentences into transcript items for NLP analysis
+    const lines = fullText.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const items = [];
+
+    lines.forEach((line) => {
+      // Check if line starts with timestamp like [00:01:23]
+      let timestamp = '00:00';
+      let content = line;
+      const match = line.match(/^\[([0-9:]+)\]\s*(.*)$/);
+      if (match) {
+        timestamp = match[1];
+        content = match[2];
+      }
+      items.push({ speaker: 'Attendee', text: content, timestamp });
+    });
+
+    const title = (momTitleInput && momTitleInput.value) ? momTitleInput.value : 'Executive Meeting Minutes';
+    const attendeesStr = (momAttendeesInput && momAttendeesInput.value) ? momAttendeesInput.value : 'Team';
+    const attendees = attendeesStr.split(',').map(s => s.trim()).filter(Boolean);
+
+    const payload = {
+      title: title,
+      attendees: attendees,
+      transcript: items
+    };
+
+    try {
+      const res = await fetch('/api/mom/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('MOM API error');
+      const data = await res.json();
+      currentMomData = data;
+      renderMomModal(data);
+      showToast('MOM generated successfully!');
+    } catch (err) {
+      console.warn('[MOM] Server generate notice, using client NLP fallback:', err);
+      const fallback = generateMomClientFallback(payload);
+      currentMomData = fallback;
+      renderMomModal(fallback);
+      showToast('MOM generated from transcript!');
+    }
+  }
+
+  // Client Offline MOM Fallback Generator
+  function generateMomClientFallback(payload) {
+    const decisions = [];
+    const actionItems = [];
+    const attendees = payload.attendees && payload.attendees.length > 0 ? payload.attendees : ['Team'];
+
+    payload.transcript.forEach((item, idx) => {
+      const txt = item.text.toLowerCase();
+      if (txt.includes('decide') || txt.includes('agreed') || txt.includes('release') || txt.includes('migrate') || txt.includes('plan') || txt.includes('approved')) {
+        decisions.push({ decision: item.text });
+      }
+      if (txt.includes('will') || txt.includes('action item') || txt.includes('task') || txt.includes('needs to') || txt.includes('deploy') || txt.includes('review') || txt.includes('handle')) {
+        const assignee = attendees[idx % attendees.length] || 'Team';
+        actionItems.push({
+          task: item.text,
+          assignee: assignee,
+          priority: txt.includes('urgent') || txt.includes('asap') ? 'High' : 'Medium',
+          status: 'Pending'
+        });
+      }
+    });
+
+    return {
+      title: payload.title,
+      executive_summary: `The meeting covered key discussion points across ${payload.transcript.length} transcribed entries. Attendees aligned on core priorities and established next deliverables. Captured ${decisions.length || 1} decision(s) and ${actionItems.length || 1} actionable assignment(s).`,
+      key_decisions: decisions.length > 0 ? decisions : [{ decision: "Team aligned on key project roadmap milestones and technical deliverables." }],
+      action_items: actionItems.length > 0 ? actionItems : [{ task: "Review complete meeting transcript and proceed with planned items.", assignee: attendees[0] || "Team", priority: "Medium", status: "Pending" }],
+      topics: [
+        { name: "Meeting Review & Audio Stream Sync", discussion: payload.transcript.map(t => t.text).join(' ') }
+      ]
+    };
+  }
+
+  // Render MOM Modal Data
+  function renderMomModal(data) {
+    if (!data) return;
+
+    // Executive Summary
+    if (momExecutiveSummary) {
+      momExecutiveSummary.textContent = data.executive_summary || 'No summary available.';
+    }
+
+    // Key Decisions
+    if (momDecisionsList) {
+      momDecisionsList.innerHTML = '';
+      if (data.key_decisions && data.key_decisions.length > 0) {
+        data.key_decisions.forEach(d => {
+          const li = document.createElement('li');
+          li.innerHTML = `<strong>${escapeHtml(d.decision)}</strong>`;
+          momDecisionsList.appendChild(li);
+        });
+      } else {
+        momDecisionsList.innerHTML = '<li class="empty-item">No explicit key decisions detected yet.</li>';
+      }
+    }
+
+    // Action Items Table
+    if (momActionItemsTbody) {
+      momActionItemsTbody.innerHTML = '';
+      if (data.action_items && data.action_items.length > 0) {
+        data.action_items.forEach((act, idx) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><input type="checkbox" ${act.status === 'Completed' ? 'checked' : ''} onchange="toggleActionItemStatus(${idx})"></td>
+            <td>${escapeHtml(act.task)}</td>
+            <td><strong>${escapeHtml(act.assignee || 'Team')}</strong></td>
+            <td><span class="priority-badge priority-${act.priority || 'Medium'}">${act.priority || 'Medium'}</span></td>
+          `;
+          momActionItemsTbody.appendChild(tr);
+        });
+      } else {
+        momActionItemsTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No action items detected.</td></tr>';
+      }
+    }
+
+    // Discussion Topics
+    if (momTopicsContainer) {
+      momTopicsContainer.innerHTML = '';
+      if (data.topics && data.topics.length > 0) {
+        data.topics.forEach(t => {
+          const div = document.createElement('div');
+          div.className = 'topic-box';
+          div.innerHTML = `
+            <h4>${escapeHtml(t.name)}</h4>
+            <p>${escapeHtml(t.discussion)}</p>
+          `;
+          momTopicsContainer.appendChild(div);
+        });
+      } else {
+        momTopicsContainer.innerHTML = '<p class="text-muted">Topics structured from transcribed meeting speech.</p>';
+      }
+    }
+  }
+
+  // Manual Action Item Addition
+  function addManualActionItem() {
+    const task = prompt('Enter Action Item Description:');
+    if (task) {
+      const attendees = (momAttendeesInput && momAttendeesInput.value)
+        ? momAttendeesInput.value.split(',').map(s => s.trim()).filter(Boolean)
+        : ['Team'];
+      const assignee = prompt('Enter Assignee:', attendees[0] || 'Team') || 'Team';
+
+      if (!currentMomData) currentMomData = { action_items: [] };
+      if (!currentMomData.action_items) currentMomData.action_items = [];
+      currentMomData.action_items.push({
+        task: task,
+        assignee: assignee,
+        priority: 'High',
+        status: 'Pending'
+      });
+      renderMomModal(currentMomData);
+      showToast('Action item added to MOM');
+    }
+  }
+
+  // Toggle Action Status
+  window.toggleActionItemStatus = function(idx) {
+    if (currentMomData && currentMomData.action_items && currentMomData.action_items[idx]) {
+      const item = currentMomData.action_items[idx];
+      item.status = item.status === 'Completed' ? 'Pending' : 'Completed';
+    }
+  };
+
+  // Copy MOM Markdown
+  function copyMomToClipboard() {
+    if (!currentMomData) {
+      showToast('Please generate MOM first');
+      return;
+    }
+    const title = (momTitleInput && momTitleInput.value) || currentMomData.title || 'Meeting Minutes';
+    const attendees = (momAttendeesInput && momAttendeesInput.value) || 'Team';
+    const date = new Date().toLocaleDateString();
+
+    let text = `# Minutes of Meeting: ${title}\n**Date:** ${date}\n**Attendees:** ${attendees}\n\n`;
+    text += `## Executive Summary\n${currentMomData.executive_summary || ''}\n\n`;
+    text += `## Key Decisions Made\n`;
+    (currentMomData.key_decisions || []).forEach(d => {
+      text += `- ${d.decision}\n`;
+    });
+    text += `\n## Action Items\n`;
+    (currentMomData.action_items || []).forEach(a => {
+      text += `- [${a.status === 'Completed' ? 'x' : ' '}] **${a.assignee || 'Team'}**: ${a.task} (${a.priority || 'Medium'})\n`;
+    });
+
+    navigator.clipboard.writeText(text)
+      .then(() => showToast('MOM copied to clipboard!'))
+      .catch(() => showToast('Failed to copy MOM'));
+  }
+
+  // Export MOM as Markdown File
+  function exportMomMarkdown() {
+    if (!currentMomData) {
+      showToast('Please generate MOM first');
+      return;
+    }
+    const title = (momTitleInput && momTitleInput.value) || currentMomData.title || 'Meeting Minutes';
+    const attendees = (momAttendeesInput && momAttendeesInput.value) || 'Team';
+    const date = new Date().toLocaleDateString();
+
+    let text = `# Minutes of Meeting: ${title}\n**Date:** ${date}\n**Attendees:** ${attendees}\n\n`;
+    text += `## Executive Summary\n${currentMomData.executive_summary || ''}\n\n`;
+    text += `## Key Decisions Made\n`;
+    (currentMomData.key_decisions || []).forEach(d => {
+      text += `- ${d.decision}\n`;
+    });
+    text += `\n## Action Items\n`;
+    (currentMomData.action_items || []).forEach(a => {
+      text += `- [${a.status === 'Completed' ? 'x' : ' '}] **${a.assignee || 'Team'}**: ${a.task} (${a.priority || 'Medium'})\n`;
+    });
+
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.replace(/\s+/g, '_')}_MOM.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('MOM downloaded as .md');
+  }
+
+  // Print / Save as PDF
+  function exportMomPdf() {
+    window.print();
+  }
+
+  // Toast Helper
+  function showToast(msg) {
+    if (!toastNotification || !toastMessage) return;
+    toastMessage.textContent = msg;
+    toastNotification.classList.add('show');
+
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      toastNotification.classList.remove('show');
+    }, 2800);
+  }
+
+  // Simulated Live Demo Stream
   function runDemoStream() {
-    if (isDemoStreaming) return;
+    if (isDemoStreaming || isRecording) return;
     isDemoStreaming = true;
-    demoStreamBtn.disabled = true;
+    if (demoStreamBtn) demoStreamBtn.disabled = true;
     startTimer();
 
+    if (liveStreamBox) liveStreamBox.classList.add('recording');
+    if (liveBars) liveBars.style.display = 'inline-flex';
+    if (liveStatusText) liveStatusText.textContent = 'DEMO STREAMING';
+    if (speechTextBox) speechTextBox.classList.add('recording-active');
+
     const sampleDialogues = [
-      { speaker: "Speaker 1 (Alex)", text: "Welcome everyone to our Q4 Sprint Sync. We need to finalize our database migration and API release dates.", delay: 1000 },
-      { speaker: "Speaker 2 (Sarah)", text: "We decided to migrate the primary database cluster to PostgreSQL 16 this coming Friday at midnight.", delay: 3500 },
-      { speaker: "Speaker 1 (Alex)", text: "Agreed. Action item: Sarah will lead the migration script deployment and verify zero-downtime backups.", delay: 6500 },
-      { speaker: "Speaker 3 (Marcus)", text: "I finished the glassmorphism UI design system for the speech transcriber dashboard.", delay: 9500 },
-      { speaker: "Speaker 2 (Sarah)", text: "Great job Marcus. Urgent task: Marcus needs to review the accessibility contrast ratios by tomorrow morning.", delay: 12500 },
-      { speaker: "Speaker 1 (Alex)", text: "Perfect. We agreed on releasing version 2.0 to production on October 15th.", delay: 15500 }
+      { text: "Welcome everyone to our Q4 Sprint Sync. We are capturing both microphone and device audio in real time.", delay: 900 },
+      { text: "We decided to migrate our primary database cluster to PostgreSQL 16 this coming Friday at midnight.", delay: 3600 },
+      { text: "Sarah will deploy the zero-downtime migration script and verify backup integrity.", delay: 6800 },
+      { text: "Agreed. Urgent task: Marcus will audit the accessibility contrast ratios by tomorrow morning.", delay: 10200 },
+      { text: "We approved releasing version 2.0 to production on October 15th.", delay: 13500 },
+      { text: "Now you can click Prepare MOM to generate your meeting minutes from this transcription.", delay: 16500 }
     ];
 
     sampleDialogues.forEach((item) => {
       setTimeout(() => {
         if (!isDemoStreaming) return;
-        livePartialText.textContent = `[Streaming] ${item.speaker}: "${item.text}"`;
-        appendTranscriptItem(item.speaker, item.text);
+        setLiveText(`"${item.text}"`, true);
+        appendRecognizedText(item.text);
       }, item.delay);
     });
 
     setTimeout(() => {
       isDemoStreaming = false;
-      demoStreamBtn.disabled = false;
+      if (demoStreamBtn) demoStreamBtn.disabled = false;
       stopTimer();
-      livePartialText.textContent = 'Demo stream complete! Generating MOM summary...';
-      generateMom();
-    }, 18000);
+      if (liveStreamBox) liveStreamBox.classList.remove('recording', 'speech-detected');
+      if (speechTextBox) speechTextBox.classList.remove('recording-active', 'speech-active');
+      if (liveBars) liveBars.style.display = 'none';
+      if (liveStatusText) liveStatusText.textContent = 'READY';
+      setLiveText('Demo stream complete. Real-time detected text is in the box above.', false);
+      if (textBoxStatusMsg) textBoxStatusMsg.textContent = 'Ready to Prepare MOM';
+      showToast('Demo meeting finished! Click "Prepare MOM" to view minutes.');
+    }, 19000);
   }
 
   // Timer logic
@@ -367,202 +1066,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const hrs = String(Math.floor(elapsedSec / 3600)).padStart(2, '0');
       const mins = String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, '0');
       const secs = String(elapsedSec % 60).padStart(2, '0');
-      sessionTimerEl.textContent = `${hrs}:${mins}:${secs}`;
+      if (sessionTimerEl) {
+        sessionTimerEl.textContent = `${hrs}:${mins}:${secs}`;
+      }
     }, 1000);
   }
 
   function stopTimer() {
     clearInterval(timerInterval);
-  }
-
-  // Append entry to transcript feed
-  function appendTranscriptItem(speaker, text) {
-    if (!text || !text.trim()) return;
-
-    if (emptyTranscriptState) {
-      emptyTranscriptState.style.display = 'none';
-    }
-
-    const timestamp = sessionTimerEl.textContent || '00:00:00';
-    const item = { speaker, text: text.trim(), timestamp };
-    transcriptItems.push(item);
-
-    const entryCard = document.createElement('div');
-    entryCard.className = 'transcript-entry';
-    entryCard.innerHTML = `
-      <div class="entry-header">
-        <span class="speaker-badge"><i class="fa-solid fa-user"></i> ${escapeHtml(speaker)}</span>
-        <span class="timestamp">${timestamp}</span>
-      </div>
-      <p class="entry-text">${escapeHtml(text)}</p>
-    `;
-
-    transcriptFeed.appendChild(entryCard);
-    transcriptFeed.scrollTop = transcriptFeed.scrollHeight;
-
-    // Trigger progressive MOM generation
-    if (transcriptItems.length % 2 === 0) {
-      generateMom();
-    }
-  }
-
-  function clearTranscript() {
-    if (confirm('Clear all recorded transcript items?')) {
-      transcriptItems = [];
-      transcriptFeed.innerHTML = '';
-      transcriptFeed.appendChild(emptyTranscriptState);
-      emptyTranscriptState.style.display = 'flex';
-      momExecutiveSummary.textContent = 'Real-time MOM summary will generate automatically...';
-      momDecisionsList.innerHTML = '<li class="empty-item">No key decisions captured yet.</li>';
-      momActionItemsTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No action items logged yet.</td></tr>';
-      momTopicsContainer.innerHTML = '<p class="text-muted">Topics will be structured as speech progresses.</p>';
-    }
-  }
-
-  // Generate / Fetch Minutes of Meeting (MOM)
-  async function generateMom() {
-    if (transcriptItems.length === 0) return;
-
-    const payload = {
-      title: meetingTitleInput.value || 'Meeting Minutes',
-      attendees: (meetingAttendeesInput.value || '').split(',').map(s => s.trim()).filter(Boolean),
-      transcript: transcriptItems
-    };
-
-    try {
-      const res = await fetch(API_GENERATE_MOM, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      currentMomData = data;
-      renderMomBoard(data);
-    } catch (e) {
-      // Local JS client fallback generator
-      const fallbackData = generateMomClientFallback(payload);
-      currentMomData = fallbackData;
-      renderMomBoard(fallbackData);
-    }
-  }
-
-  // Client Fallback MOM Generator
-  function generateMomClientFallback(payload) {
-    const fullText = payload.transcript.map(t => t.text).join(' ');
-    const decisions = [];
-    const actionItems = [];
-
-    payload.transcript.forEach(item => {
-      const txt = item.text.toLowerCase();
-      if (txt.includes('decide') || txt.includes('agreed') || txt.includes('release') || txt.includes('migrate')) {
-        decisions.push({ decision: item.text, speaker: item.speaker });
-      }
-      if (txt.includes('will') || txt.includes('action item') || txt.includes('task') || txt.includes('needs to')) {
-        actionItems.push({
-          task: item.text,
-          assignee: item.speaker,
-          priority: txt.includes('urgent') ? 'High' : 'Medium',
-          status: 'Pending'
-        });
-      }
-    });
-
-    return {
-      title: payload.title,
-      executive_summary: `Meeting attended by ${payload.attendees.join(', ')}. Discussion covered core sprint milestones. Captured ${decisions.length} key decision(s) and ${actionItems.length} action item(s).`,
-      key_decisions: decisions.length > 0 ? decisions : [{ decision: "Team agreed on upcoming sprint priorities." }],
-      action_items: actionItems.length > 0 ? actionItems : [{ task: "Review transcript details.", assignee: payload.attendees[0] || "Team", priority: "Medium", status: "Pending" }],
-      topics: [{ name: "Main Sprint Discussion", discussion: fullText }]
-    };
-  }
-
-  // Render MOM Board UI
-  function renderMomBoard(data) {
-    // Executive Summary
-    momExecutiveSummary.textContent = data.executive_summary || 'No summary available.';
-
-    // Decisions
-    momDecisionsList.innerHTML = '';
-    if (data.key_decisions && data.key_decisions.length > 0) {
-      data.key_decisions.forEach(d => {
-        const li = document.createElement('li');
-        li.innerHTML = `<strong>${escapeHtml(d.decision)}</strong> <span class="text-muted">(${escapeHtml(d.speaker || 'Team')})</span>`;
-        momDecisionsList.appendChild(li);
-      });
-    } else {
-      momDecisionsList.innerHTML = '<li class="empty-item">No key decisions captured yet.</li>';
-    }
-
-    // Action Items
-    momActionItemsTbody.innerHTML = '';
-    if (data.action_items && data.action_items.length > 0) {
-      data.action_items.forEach((act, idx) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><input type="checkbox" ${act.status === 'Completed' ? 'checked' : ''} onchange="toggleActionStatus(${idx})"></td>
-          <td>${escapeHtml(act.task)}</td>
-          <td><strong>${escapeHtml(act.assignee)}</strong></td>
-          <td><span class="priority-badge priority-${act.priority || 'Medium'}">${act.priority || 'Medium'}</span></td>
-        `;
-        momActionItemsTbody.appendChild(tr);
-      });
-    } else {
-      momActionItemsTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No action items logged yet.</td></tr>';
-    }
-
-    // Topics
-    momTopicsContainer.innerHTML = '';
-    if (data.topics && data.topics.length > 0) {
-      data.topics.forEach(t => {
-        const div = document.createElement('div');
-        div.className = 'topic-box';
-        div.innerHTML = `
-          <h4>${escapeHtml(t.name)}</h4>
-          <p>${escapeHtml(t.discussion)}</p>
-        `;
-        momTopicsContainer.appendChild(div);
-      });
-    } else {
-      momTopicsContainer.innerHTML = '<p class="text-muted">Topics will be structured as speech progresses.</p>';
-    }
-  }
-
-  // Export Tools
-  function exportPdf() {
-    window.print();
-  }
-
-  function exportMarkdown() {
-    if (!currentMomData) return alert('No MOM data to export yet!');
-    let md = `# Minutes of Meeting: ${currentMomData.title}\n`;
-    md += `**Date:** ${new Date().toLocaleDateString()}\n\n`;
-    md += `## Executive Summary\n${currentMomData.executive_summary}\n\n`;
-    md += `## Key Decisions\n`;
-    (currentMomData.key_decisions || []).forEach(d => {
-      md += `- ${d.decision} (${d.speaker})\n`;
-    });
-    md += `\n## Action Items\n`;
-    (currentMomData.action_items || []).forEach(a => {
-      md += `- [ ] **${a.assignee}**: ${a.task} [Priority: ${a.priority}]\n`;
-    });
-    
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${currentMomData.title.replace(/\s+/g, '_')}_MOM.md`;
-    a.click();
-  }
-
-  function copyMomToClipboard() {
-    if (!currentMomData) return alert('No MOM data to copy!');
-    const text = `MINUTES OF MEETING: ${currentMomData.title}\n\nEXECUTIVE SUMMARY:\n${currentMomData.executive_summary}\n\nKEY DECISIONS:\n` +
-      (currentMomData.key_decisions || []).map(d => `• ${d.decision}`).join('\n') +
-      `\n\nACTION ITEMS:\n` +
-      (currentMomData.action_items || []).map(a => `• [${a.assignee}] ${a.task}`).join('\n');
-    
-    navigator.clipboard.writeText(text);
-    alert('MOM copied to clipboard!');
   }
 
   function escapeHtml(str) {

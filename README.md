@@ -6,26 +6,32 @@ An end-to-end, high-performance platform for real-time English speech transcript
 
 ## 🌟 Key Features
 
-1. **Real-Time Speech Recognition (ASR)**:
-   - Powered by `sherpa-onnx` English streaming Zipformer model (~630 MB).
-   - Real-time Web Audio API PCM streaming over WebSockets (`16,000 Hz`).
-   - Browser Web Speech API & simulated demo stream fallbacks for offline testing.
+1. **Real-Time Speech Detection Text Box**:
+   - Spoken words from your **Microphone** AND **Device Audio** (system sound / Google Meet / Zoom / MS Teams / video) are detected in real time and stream directly into the text box.
+   - Interim speech is displayed live in real-time as spoken.
+   - Real-time word count & character count tracking.
+   - Freely type, edit, format, or append text alongside voice detection.
 
-2. **Automated Minutes of Meeting (MOM) Engine**:
-   - **Executive Summary**: Synthesizes discussion highlights automatically.
-   - **Key Decisions**: Extracts agreed decisions with timestamps and speaker attribution.
-   - **Action Items Matrix**: Identifies tasks, assignees, and priority levels (`High`, `Medium`).
-   - **Topic Segmentation**: Groups transcript sections into structured meeting agenda topics.
+2. **Device & System Audio Capture (Meeting Mode)**:
+   - **Audio Source Selector**:
+     - `🎙️+💻 Both: Mic + Device Audio (Meeting Mode)`: Captures both your speech and other attendees in Zoom/Meet/Teams!
+     - `💻 Device Audio Only`: Captures incoming meeting audio or video playback.
+     - `🎙️ Microphone Only`: Captures local microphone audio.
+   - In Chrome/Edge: when prompted, check **"Share tab audio"** (for Meet/Teams tab) or **"Also share system audio"** (for screen share) to capture device sound.
 
-3. **Modern Visual Interface**:
-   - Dark theme glassmorphism aesthetic with audio frequency waveform visualizer.
-   - Session timer, active speaker selector, and live speech stream pulse indicator.
-   - Transcript search & filter by speaker or keyword.
+3. **Instant Minutes of Meeting (MOM) Preparation**:
+   - Click **"Prepare MOM"** on the text box toolbar to automatically generate:
+     - **Executive Summary**: Synthesizes discussion highlights.
+     - **Key Decisions**: Extracts decisions with checkmarks.
+     - **Action Items Matrix**: Tasks, assignees, priorities (`High`, `Medium`), and completion status.
+     - **Discussion Topics**: Timeline of meeting topics.
+   - **Export Options**: One-click Copy MOM markdown, Save `.md` file, or Print / Save as PDF.
 
-4. **Multi-Format Export**:
-   - **PDF Export**: Clean print styling formatted for executive sharing.
-   - **Markdown Export**: `.md` file generator for documentation repositories.
-   - **Copy to Clipboard**: Quick formatted plain text export.
+4. **Speech Engine & Visuals**:
+   - Powered by native `sherpa-onnx` English streaming Zipformer model (`16,000 Hz`).
+   - Browser Web Speech API fallback with multi-language selector support.
+   - Live audio frequency waveform visualizer and pulse status badge.
+   - Built-in "Test Demo Speech" stream for instant testing without a microphone.
 
 ---
 
