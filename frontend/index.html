@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sherpa ONNX Real-Time Speech-to-Text & MOM Platform</title>
+  <!-- Google Fonts & Font Awesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo-icon">
+        <i class="fa-solid fa-microchip-ai"></i>
+      </div>
+      <div class="brand-text">
+        <h1>Sherpa-MOM <span class="tag-badge">ONNX 630MB Engine</span></h1>
+        <p>Real-Time Speech Recognition & Minutes of Meeting Platform</p>
+      </div>
+    </div>
+
+    <!-- Status Badges -->
+    <div class="header-status">
+      <div class="status-pill" id="engineStatusPill">
+        <span class="dot yellow"></span>
+        <span class="status-text" id="engineStatusText">Connecting Engine...</span>
+      </div>
+      <div class="status-pill" id="wsStatusPill">
+        <span class="dot red"></span>
+        <span class="status-text" id="wsStatusText">WebSocket Offline</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Meeting Setup Bar -->
+    <section class="meeting-meta-bar">
+      <div class="meta-input-group">
+        <i class="fa-solid fa-heading"></i>
+        <input type="text" id="meetingTitleInput" value="Q4 Product Roadmap & Sprint Sync" placeholder="Meeting Title...">
+      </div>
+      
+      <div class="meta-input-group">
+        <i class="fa-solid fa-users"></i>
+        <input type="text" id="meetingAttendeesInput" value="Alex (Host), Sarah (Dev Lead), Marcus (Design)" placeholder="Attendees (comma separated)...">
+      </div>
+
+
+    </section>
+
+    <!-- Recording Control Deck & Audio Visualizer -->
+    <section class="control-deck-card">
+      <div class="deck-controls">
+        <button id="startRecordBtn" class="btn btn-primary primary-glow">
+          <i class="fa-solid fa-microphone"></i> Start Real-Time Mic
+        </button>
+        <button id="stopRecordBtn" class="btn btn-danger" disabled>
+          <i class="fa-solid fa-square"></i> Stop Recording
+        </button>
+        <button id="demoStreamBtn" class="btn btn-accent">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Run Live Demo Stream
+        </button>
+        <button id="generateMomBtn" class="btn btn-secondary">
+          <i class="fa-solid fa-bolt"></i> Refresh MOM Summary
+        </button>
+      </div>
+
+      <div class="recording-indicator-group">
+        <div class="timer-display">
+          <i class="fa-regular fa-clock"></i>
+          <span id="sessionTimer">00:00:00</span>
+        </div>
+
+        <div class="visualizer-container">
+          <canvas id="waveformCanvas" width="300" height="40"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Content Workspace Grid -->
+    <div class="workspace-grid">
+      
+      <!-- Left Column: Live Speech Transcript -->
+      <section class="panel-card live-transcript-panel">
+        <div class="panel-header">
+          <h2><i class="fa-solid fa-stream"></i> Real-Time Speech Stream</h2>
+          <div class="panel-actions">
+            <div class="search-box">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="transcriptSearchInput" placeholder="Filter transcript...">
+            </div>
+            <button id="clearTranscriptBtn" class="btn-text" title="Clear Transcript"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </div>
+
+        <!-- Live Partial Stream Banner -->
+        <div class="live-stream-box" id="liveStreamBox">
+          <span class="live-pulse-badge"><i class="fa-solid fa-circle"></i> DETECTING SPEECH</span>
+          <p id="livePartialText" class="partial-text">Listening for speech input...</p>
+        </div>
+
+        <!-- Transcript Feed Scroll List -->
+        <div class="transcript-feed" id="transcriptFeed">
+          <div class="empty-state" id="emptyTranscriptState">
+            <i class="fa-solid fa-waveform"></i>
+            <p>Click <strong>Start Real-Time Mic</strong> or <strong>Run Live Demo Stream</strong> to begin speech detection.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Minutes of Meeting (MOM) AI Board -->
+      <section class="panel-card mom-board-panel" id="printableMomArea">
+        <div class="panel-header">
+          <h2><i class="fa-solid fa-file-signature"></i> Minutes of Meeting (MOM)</h2>
+          <div class="panel-actions">
+            <button id="exportPdfBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-file-pdf"></i> Export PDF</button>
+            <button id="exportMdBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-file-code"></i> Markdown</button>
+            <button id="copyMomBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-copy"></i> Copy</button>
+          </div>
+        </div>
+
+        <div class="mom-content-scroll" id="momContentScroll">
+          
+          <!-- Executive Summary -->
+          <div class="mom-section-card">
+            <h3><i class="fa-solid fa-align-left"></i> Executive Summary</h3>
+            <p id="momExecutiveSummary" class="mom-summary-text">
+              Real-time MOM summary will generate automatically as transcript items are captured.
+            </p>
+          </div>
+
+          <!-- Key Decisions -->
+          <div class="mom-section-card">
+            <h3><i class="fa-solid fa-circle-check"></i> Key Decisions Made</h3>
+            <ul id="momDecisionsList" class="mom-list decisions-list">
+              <li class="empty-item">No key decisions captured yet.</li>
+            </ul>
+          </div>
+
+          <!-- Action Items Table -->
+          <div class="mom-section-card">
+            <div class="section-title-row">
+              <h3><i class="fa-solid fa-list-check"></i> Action Items & Owners</h3>
+              <button id="addManualActionBtn" class="btn-text-sm"><i class="fa-solid fa-plus"></i> Add Action</button>
+            </div>
+            <div class="table-responsive">
+              <table class="action-items-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Task Description</th>
+                    <th>Assignee</th>
+                    <th>Priority</th>
+                  </tr>
+                </thead>
+                <tbody id="momActionItemsTbody">
+                  <tr>
+                    <td colspan="4" class="text-center text-muted">No action items logged yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Discussion Topics Breakdown -->
+          <div class="mom-section-card">
+            <h3><i class="fa-solid fa-comments"></i> Agenda Topics Breakdown</h3>
+            <div id="momTopicsContainer" class="topics-timeline">
+              <p class="text-muted">Topics will be structured as speech progresses.</p>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
