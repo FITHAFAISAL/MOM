@@ -25,10 +25,7 @@
     </div>
 
     <div class="header-status">
-      <div class="status-pill" id="backendStatusPill" title="Server Connection Status">
-        <span class="dot green" id="backendDot"></span>
-        <span id="backendStatusText">Server Online</span>
-      </div>
+
       <div class="status-pill" id="engineStatusPill" title="Speech Engine Mode">
         <i class="fa-solid fa-microchip"></i>
         <span id="engineStatusText">Sherpa / WebSpeech</span>
@@ -56,9 +53,9 @@
           <i class="fa-solid fa-sliders"></i>
           <label for="audioSourceSelect">Audio Source:</label>
           <select id="audioSourceSelect">
-            <option value="both" selected>🎙️+💻 Both: Mic + Device Audio (Meeting Mode)</option>
+            <option value="mic" selected>🎙️ Microphone Only</option>
+            <option value="both">🎙️+💻 Both: Mic + Device Audio (Meeting Mode)</option>
             <option value="device">💻 Device / System Audio (Meeting Tab or App)</option>
-            <option value="mic">🎙️ Microphone Only</option>
           </select>
           <button id="deviceAudioHelpBtn" class="help-circle-btn" title="How to capture device/meeting audio in browser" type="button">
             <i class="fa-solid fa-circle-question"></i>

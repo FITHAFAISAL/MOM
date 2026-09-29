@@ -97,12 +97,23 @@ document.addEventListener('DOMContentLoaded', () => {
   init();
 
   function init() {
+    checkProtocol();
     setupCanvas();
     checkBackendStatus();
     connectWebSocket();
     setupEventListeners();
     updateTextStats();
     updateAudioSourceLabel();
+  }
+
+  function checkProtocol() {
+    if (window.location.protocol === 'file:') {
+      const banner = document.createElement('div');
+      banner.id = 'fileProtocolBanner';
+      banner.style.cssText = 'background: #dc2626; color: white; text-align: center; padding: 12px 20px; font-weight: 600; font-size: 0.95rem; position: sticky; top: 0; left: 0; right: 0; z-index: 99999; box-shadow: 0 4px 14px rgba(0,0,0,0.6);';
+      banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Notice: You opened this page via <code>file://</code>. Web browsers automatically block microphone access on local file paths. Please open <a href="http://127.0.0.1:8000" style="color: #fef08a; text-decoration: underline; font-weight: 700; margin-left: 6px;">http://127.0.0.1:8000</a> to use microphone recording and the offline AI engine!';
+      document.body.prepend(banner);
+    }
   }
 
   // Canvas visualizer setup
@@ -267,12 +278,35 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fontIncBtn) fontIncBtn.addEventListener('click', () => changeFontSize(2));
   }
 
+  // Downsample audio buffer to 16,000 Hz and convert to Int16 PCM for Sherpa-ONNX
+  function resampleAndConvertPCM16(inputData, inputSampleRate) {
+    const targetSampleRate = 16000;
+    let resampled;
+    if (inputSampleRate === targetSampleRate) {
+      resampled = inputData;
+    } else {
+      const ratio = inputSampleRate / targetSampleRate;
+      const newLength = Math.round(inputData.length / ratio);
+      resampled = new Float32Array(newLength);
+      for (let i = 0; i < newLength; i++) {
+        const index = Math.min(Math.floor(i * ratio), inputData.length - 1);
+        resampled[i] = inputData[index];
+      }
+    }
+    const pcm16 = new Int16Array(resampled.length);
+    for (let i = 0; i < resampled.length; i++) {
+      const s = Math.max(-1, Math.min(1, resampled[i]));
+      pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return pcm16;
+  }
+
   // Update Audio Source Label & Pill
   function updateAudioSourceLabel() {
-    const mode = audioSourceSelect ? audioSourceSelect.value : 'both';
-    let label = 'Mic + Device Audio';
+    const mode = audioSourceSelect ? audioSourceSelect.value : 'mic';
+    let label = 'Microphone Only';
     if (mode === 'device') label = 'Device Audio (Meeting)';
-    if (mode === 'mic') label = 'Microphone Only';
+    if (mode === 'both') label = 'Mic + Device Audio';
 
     if (audioModeStatusText) audioModeStatusText.textContent = label;
     if (liveSourceTag) liveSourceTag.innerHTML = `<i class="fa-solid fa-broadcast-tower"></i> Source: ${label}`;
@@ -290,33 +324,42 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start Real-Time Speech Detection (Mic, Device Audio, or Both)
   async function startRecording() {
     if (isRecording) return;
-    const mode = audioSourceSelect ? audioSourceSelect.value : 'both';
+
+    // Check mediaDevices support (requires secure context / http://localhost or 127.0.0.1)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Microphone access is unavailable.\n\nPlease ensure you are accessing via http://127.0.0.1:8000 or http://localhost:8000 (browsers block microphone permissions on file:// URLs).');
+      return;
+    }
+
+    const mode = audioSourceSelect ? audioSourceSelect.value : 'mic';
+    let hasAudioSource = false;
+
+    // Show immediate button feedback
+    if (toggleRecordBtn) {
+      toggleRecordBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Connecting...</span>';
+    }
 
     try {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      const mixedDestination = audioContext.createMediaStreamDestination();
-      let hasAudioSource = false;
-
-      // 1. Capture Microphone if requested
-      if (mode === 'mic' || mode === 'both') {
-        try {
-          micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-          const micSource = audioContext.createMediaStreamSource(micStream);
-          micSource.connect(mixedDestination);
-          hasAudioSource = true;
-          console.log('[Audio] Microphone stream connected');
-        } catch (micErr) {
-          console.warn('[Audio] Microphone access issue:', micErr);
-          if (mode === 'mic') {
-            throw new Error('Microphone permission required: ' + micErr.message);
-          }
-        }
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error('Web Audio API is not supported in this browser.');
       }
 
-      // 2. Capture Device / System Audio (Meeting / Screen / Tab share with audio)
-      if (mode === 'device' || mode === 'both') {
+      try {
+        audioContext = new AudioContextClass({ sampleRate: 16000 });
+      } catch (e) {
+        audioContext = new AudioContextClass();
+      }
+
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      const mixedDestination = audioContext.createMediaStreamDestination();
+
+      // 1. If 'both' or 'device', capture device audio FIRST while user click gesture is fresh
+      if (mode === 'both' || mode === 'device') {
         try {
-          // getDisplayMedia in Chrome requires video: true to capture audio
           deviceStream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: 640, height: 360 },
             audio: {
@@ -333,7 +376,6 @@ document.addEventListener('DOMContentLoaded', () => {
             hasAudioSource = true;
             console.log('[Audio] Device audio stream connected');
 
-            // Handle user clicking browser's "Stop sharing" button
             audioTracks[0].onended = () => {
               console.log('[Audio] Device sharing ended by user');
               if (isRecording && mode === 'device') {
@@ -341,21 +383,51 @@ document.addEventListener('DOMContentLoaded', () => {
               }
             };
           } else {
-            showToast('Note: No device audio shared. Did you check "Share tab audio" or "Share system audio"?');
+            showToast('Note: No device sound shared. Make sure "Share audio" is checked in browser sharing prompt.');
           }
         } catch (devErr) {
           console.warn('[Audio] Device audio capture cancelled/failed:', devErr);
-          if (mode === 'device' && !hasAudioSource) {
+          if (mode === 'device') {
             throw new Error('Device audio sharing was cancelled or not supported.');
+          } else {
+            showToast('Device audio skipped. Proceeding with microphone...');
+          }
+        }
+      }
+
+      // 2. Capture Microphone if requested
+      if (mode === 'mic' || mode === 'both') {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            },
+            video: false
+          });
+          const micSource = audioContext.createMediaStreamSource(micStream);
+          micSource.connect(mixedDestination);
+          hasAudioSource = true;
+          console.log('[Audio] Microphone stream connected');
+        } catch (micErr) {
+          console.warn('[Audio] Microphone access issue:', micErr);
+          if (!hasAudioSource) {
+            throw new Error('Microphone permission required: ' + (micErr.message || 'Access denied'));
           }
         }
       }
 
       if (!hasAudioSource) {
-        throw new Error('No audio track available. Please grant access to your microphone or share device audio.');
+        throw new Error('No audio input could be connected. Please grant microphone access.');
       }
 
       mixedStream = mixedDestination.stream;
+
+      // Ensure audioContext is active
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
 
       // 3. Audio Visualizer Setup
       const analyser = audioContext.createAnalyser();
@@ -387,7 +459,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       drawWaveform();
 
-      // 4. PCM16 Streaming to Sherpa-ONNX Backend via WebSocket
+      // 4. PCM16 Streaming to Sherpa-ONNX Backend via WebSocket with Downsampling
+      const currentSampleRate = audioContext.sampleRate || 16000;
       scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
       combinedSource.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
@@ -395,35 +468,50 @@ document.addEventListener('DOMContentLoaded', () => {
       scriptProcessor.onaudioprocess = (e) => {
         if (!isRecording) return;
         const inputData = e.inputBuffer.getChannelData(0);
-
-        const pcm16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
+        const pcm16 = resampleAndConvertPCM16(inputData, currentSampleRate);
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(pcm16.buffer);
         }
       };
 
-      // 5. Browser Web Speech Recognition Engine (for instantaneous interim text)
+      // Connect or reconnect websocket if disconnected
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+      }
+
+      // 5. Browser Web Speech Recognition Engine (optional instantaneous interim text)
       if (SpeechRecognition) {
         setupSpeechRecognition();
         isSpeechApiActive = true;
       } else {
         isSpeechApiActive = false;
-        console.log('Using backend Sherpa-ONNX audio processor');
       }
 
       isRecording = true;
       updateUiOnStart();
       startTimer();
-      showToast(`Listening: ${audioSourceSelect.options[audioSourceSelect.selectedIndex].text}`);
+      const selectedSourceText = audioSourceSelect ? audioSourceSelect.options[audioSourceSelect.selectedIndex].text : 'Microphone';
+      showToast(`Listening: ${selectedSourceText}`);
 
     } catch (err) {
       console.error('[Recording] Start failed:', err);
-      alert('Audio Capture notice:\n' + err.message + '\n\nTip: When sharing device audio, choose "Chrome Tab" with "Share tab audio" or "Entire Screen" with "Also share system audio".');
+      // Clean up partial allocations
+      if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+      if (deviceStream) {
+        deviceStream.getTracks().forEach(t => t.stop());
+        deviceStream = null;
+      }
+      if (audioContext) {
+        try { audioContext.close(); } catch (e) {}
+        audioContext = null;
+      }
+      isRecording = false;
+      updateUiOnStop();
+      alert('Could not start audio:\n' + err.message + '\n\nTip: You can also click "Test Demo Speech" to test live speech transcription and MOM!');
     }
   }
 
@@ -469,17 +557,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    let webSpeechNetworkError = false;
     recognition.onerror = (event) => {
-      // In mandatory offline mode, silence browser network errors since Sherpa-ONNX runs locally
       if (event.error === 'network') {
+        webSpeechNetworkError = true;
         console.log('[Offline Engine] Operating 100% locally on Sherpa-ONNX ASR (air-gapped)');
         return;
+      }
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        webSpeechNetworkError = true;
       }
       console.warn('[SpeechRecognition] Notice:', event.error);
     };
 
     recognition.onend = () => {
-      if (isRecording) {
+      if (isRecording && !webSpeechNetworkError) {
         try { recognition.start(); } catch (e) {}
       }
     };

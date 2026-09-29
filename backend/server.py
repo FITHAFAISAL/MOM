@@ -61,7 +61,7 @@ def get_status():
             MODEL_DIR = active
             transcriber.load_model(MODEL_DIR)
     return {
-        "status": "online",
+        "status": "ready",
         "engine": "sherpa-onnx-offline",
         "offline_mandatory": True,
         "model_dir": MODEL_DIR,
