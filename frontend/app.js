@@ -124,7 +124,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const msg = JSON.parse(event.data);
         if (msg.type === 'transcription') {
           if (msg.is_final) {
-            appendTranscriptItem(activeSpeakerSelect.value, msg.text);
+            const speaker = (activeSpeakerSelect && activeSpeakerSelect.value) ? activeSpeakerSelect.value : 'Speaker';
+            appendTranscriptItem(speaker, msg.text);
             livePartialText.textContent = 'Listening...';
           } else {
             livePartialText.textContent = msg.text || 'Listening...';
@@ -153,21 +154,25 @@ document.addEventListener('DOMContentLoaded', () => {
     generateMomBtn.addEventListener('click', generateMom);
     clearTranscriptBtn.addEventListener('click', clearTranscript);
     
-    addSpeakerBtn.addEventListener('click', () => {
-      const name = prompt('Enter new speaker name:');
-      if (name) {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        activeSpeakerSelect.appendChild(opt);
-        activeSpeakerSelect.value = name;
-      }
-    });
+    if (addSpeakerBtn && activeSpeakerSelect) {
+      addSpeakerBtn.addEventListener('click', () => {
+        const name = prompt('Enter new speaker name:');
+        if (name) {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          activeSpeakerSelect.appendChild(opt);
+          activeSpeakerSelect.value = name;
+        }
+      });
+    }
 
     addManualActionBtn.addEventListener('click', () => {
       const task = prompt('Enter Action Task:');
       if (task) {
-        const assignee = activeSpeakerSelect.value;
+        const assignee = (activeSpeakerSelect && activeSpeakerSelect.value) 
+          ? activeSpeakerSelect.value 
+          : (meetingAttendeesInput && meetingAttendeesInput.value ? meetingAttendeesInput.value.split(',')[0].trim() : 'Participant');
         if (!currentMomData) currentMomData = { action_items: [] };
         if (!currentMomData.action_items) currentMomData.action_items = [];
         currentMomData.action_items.push({
@@ -276,7 +281,8 @@ document.addEventListener('DOMContentLoaded', () => {
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           const finalTranscript = event.results[i][0].transcript;
-          appendTranscriptItem(activeSpeakerSelect.value, finalTranscript);
+          const speaker = (activeSpeakerSelect && activeSpeakerSelect.value) ? activeSpeakerSelect.value : 'Speaker';
+          appendTranscriptItem(speaker, finalTranscript);
         } else {
           interim += event.results[i][0].transcript;
         }
