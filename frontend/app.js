@@ -4,7 +4,7 @@
  * Features:
  *  - Real-time Speech Detection into Dedicated Text Box
  *  - Captures Microphone & Device/System Audio (Zoom, Meet, Teams, Video)
- *  - Native Sherpa-ONNX Streaming Transcriber over WebSocket + WebSpeech
+ *  - Local Sherpa-ONNX Parakeet TDT 0.6B Transcriber over WebSocket
  *  - Instant Minutes of Meeting (MOM) Preparation & Export
  */
 
@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleRecordBtn = document.getElementById('toggleRecordBtn');
   const demoStreamBtn = document.getElementById('demoStreamBtn');
   const audioSourceSelect = document.getElementById('audioSourceSelect');
-  const languageSelect = document.getElementById('languageSelect');
   const sessionTimerEl = document.getElementById('sessionTimer');
   const waveformCanvas = document.getElementById('waveformCanvas');
   const canvasCtx = waveformCanvas ? waveformCanvas.getContext('2d') : null;
@@ -71,14 +70,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const toastNotification = document.getElementById('toastNotification');
   const toastMessage = document.getElementById('toastMessage');
 
+  // Mic ducking in "Mic + Device" mode: device audio above this level counts as the
+  // remote side talking, and the mic stays muted for the hold time after it stops.
+  const DEVICE_SPEECH_RMS = 0.008;
+  const MIC_DUCK_HOLD_SECONDS = 0.4;
+
   // Application State
   let websocket = null;
   let isRecording = false;
   let isDemoStreaming = false;
+  let backendModelReady = false;
+  let audioSampleRate = null;
+  let websocketSampleRate = null;
   let audioContext = null;
+  let isStartingRecording = false;
   let micStream = null;
   let deviceStream = null;
-  let mixedStream = null;
   let scriptProcessor = null;
   let animationFrameId = null;
   let timerInterval = null;
@@ -87,11 +94,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let includeTimestamps = false;
   let toastTimeout = null;
   let currentMomData = null;
-
-  // Speech Recognition API resolution
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition = null;
-  let isSpeechApiActive = false;
 
   // Initialize
   init();
@@ -129,20 +131,23 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/status');
       if (res.ok) {
         const data = await res.json();
-        if (backendDot) backendDot.className = 'dot green';
-        if (backendStatusText) backendStatusText.textContent = '100% Offline (Local)';
+        const modelReady = data.is_model_loaded === true;
+        backendModelReady = modelReady;
+        if (backendDot) backendDot.className = modelReady ? 'dot green' : 'dot red';
+        if (backendStatusText) backendStatusText.textContent = modelReady ? 'Parakeet offline model ready' : 'Parakeet 630 MB offline model required';
         if (engineStatusText) {
-          if (data.is_model_loaded) {
-            engineStatusText.textContent = '🔒 Sherpa-ONNX (Air-Gapped)';
-          } else {
-            engineStatusText.textContent = 'Sherpa-ONNX Loading...';
-          }
+          engineStatusText.textContent = modelReady ? 'Sherpa-ONNX Large (Offline)' : 'Large offline model unavailable';
         }
+        return modelReady;
       }
+      throw new Error(`Status request failed (${res.status})`);
     } catch (e) {
       console.warn('[Backend] Status check notice:', e);
-      if (backendDot) backendDot.className = 'dot green';
-      if (backendStatusText) backendStatusText.textContent = '100% Offline (Local)';
+      backendModelReady = false;
+      if (backendDot) backendDot.className = 'dot red';
+      if (backendStatusText) backendStatusText.textContent = 'Local backend unavailable';
+      if (engineStatusText) engineStatusText.textContent = 'Large offline model unavailable';
+      return false;
     }
   }
 
@@ -158,6 +163,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       websocket.onopen = () => {
         console.log('[WebSocket] Connected to Sherpa-ONNX backend STT service');
+        websocketSampleRate = null;
+        configureAudioSampleRate();
       };
 
       websocket.onmessage = (event) => {
@@ -181,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       websocket.onclose = () => {
+        websocketSampleRate = null;
         setTimeout(connectWebSocket, 4000);
       };
 
@@ -190,6 +198,20 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.warn('[WebSocket] Init notice:', e);
     }
+  }
+
+  function configureAudioSampleRate() {
+    if (
+      !audioSampleRate
+      || !websocket
+      || websocket.readyState !== WebSocket.OPEN
+      || websocketSampleRate === audioSampleRate
+    ) {
+      return;
+    }
+
+    websocket.send(JSON.stringify({ action: 'configure', sample_rate: audioSampleRate }));
+    websocketSampleRate = audioSampleRate;
   }
 
   // Setup Event Listeners
@@ -207,16 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Demo stream button
     if (demoStreamBtn) {
       demoStreamBtn.addEventListener('click', runDemoStream);
-    }
-
-    // Language selection change
-    if (languageSelect) {
-      languageSelect.addEventListener('change', () => {
-        if (isRecording && recognition) {
-          recognition.lang = languageSelect.value;
-          showToast(`Language set to ${languageSelect.options[languageSelect.selectedIndex].text}`);
-        }
-      });
     }
 
     // Text box direct input
@@ -278,24 +290,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fontIncBtn) fontIncBtn.addEventListener('click', () => changeFontSize(2));
   }
 
-  // Downsample audio buffer to 16,000 Hz and convert to Int16 PCM for Sherpa-ONNX
-  function resampleAndConvertPCM16(inputData, inputSampleRate) {
-    const targetSampleRate = 16000;
-    let resampled;
-    if (inputSampleRate === targetSampleRate) {
-      resampled = inputData;
-    } else {
-      const ratio = inputSampleRate / targetSampleRate;
-      const newLength = Math.round(inputData.length / ratio);
-      resampled = new Float32Array(newLength);
-      for (let i = 0; i < newLength; i++) {
-        const index = Math.min(Math.floor(i * ratio), inputData.length - 1);
-        resampled[i] = inputData[index];
-      }
-    }
-    const pcm16 = new Int16Array(resampled.length);
-    for (let i = 0; i < resampled.length; i++) {
-      const s = Math.max(-1, Math.min(1, resampled[i]));
+  function convertFloatToPCM16(inputData) {
+    const pcm16 = new Int16Array(inputData.length);
+    for (let i = 0; i < inputData.length; i++) {
+      const s = Math.max(-1, Math.min(1, inputData[i]));
       pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
     return pcm16;
@@ -314,6 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Toggle Recording
   function toggleRecording() {
+    if (isStartingRecording) return;
     if (isRecording) {
       stopRecording();
     } else {
@@ -323,7 +322,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Start Real-Time Speech Detection (Mic, Device Audio, or Both)
   async function startRecording() {
-    if (isRecording) return;
+    if (isRecording || isStartingRecording) return;
+
+    if (!backendModelReady) {
+      alert('The required Sherpa-ONNX Parakeet TDT 0.6B English model is not ready. Download it with download_model.py and restart the app.');
+      return;
+    }
 
     // Check mediaDevices support (requires secure context / http://localhost or 127.0.0.1)
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -334,10 +338,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const mode = audioSourceSelect ? audioSourceSelect.value : 'mic';
     let hasAudioSource = false;
 
-    // Show immediate button feedback
+    // Show immediate button feedback and block re-entry while permissions are pending
+    isStartingRecording = true;
     if (toggleRecordBtn) {
+      toggleRecordBtn.disabled = true;
       toggleRecordBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Connecting...</span>';
     }
+
+    // Every node for this session must come from this one context
+    let ctx = null;
 
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -346,33 +355,36 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        audioContext = new AudioContextClass({ sampleRate: 16000 });
+        ctx = new AudioContextClass({ sampleRate: 16000 });
       } catch (e) {
-        audioContext = new AudioContextClass();
+        ctx = new AudioContextClass();
+      }
+      audioContext = ctx;
+
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
       }
 
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
-      }
-
-      const mixedDestination = audioContext.createMediaStreamDestination();
+      // Device audio on channel 0, microphone on channel 1, mixed in onaudioprocess
+      const merger = ctx.createChannelMerger(2);
 
       // 1. If 'both' or 'device', capture device audio FIRST while user click gesture is fresh
       if (mode === 'both' || mode === 'device') {
         try {
           deviceStream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: 640, height: 360 },
+            // Meeting audio is already processed by the call app; mic filters only distort it
             audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
             }
           });
 
           const audioTracks = deviceStream.getAudioTracks();
           if (audioTracks.length > 0) {
-            const devSource = audioContext.createMediaStreamSource(deviceStream);
-            devSource.connect(mixedDestination);
+            const devSource = ctx.createMediaStreamSource(deviceStream);
+            devSource.connect(merger, 0, 0);
             hasAudioSource = true;
             console.log('[Audio] Device audio stream connected');
 
@@ -406,8 +418,8 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             video: false
           });
-          const micSource = audioContext.createMediaStreamSource(micStream);
-          micSource.connect(mixedDestination);
+          const micSource = ctx.createMediaStreamSource(micStream);
+          micSource.connect(merger, 0, 1);
           hasAudioSource = true;
           console.log('[Audio] Microphone stream connected');
         } catch (micErr) {
@@ -422,18 +434,16 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('No audio input could be connected. Please grant microphone access.');
       }
 
-      mixedStream = mixedDestination.stream;
 
       // Ensure audioContext is active
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
       }
 
       // 3. Audio Visualizer Setup
-      const analyser = audioContext.createAnalyser();
+      const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      const combinedSource = audioContext.createMediaStreamSource(mixedStream);
-      combinedSource.connect(analyser);
+      merger.connect(analyser);
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -459,18 +469,46 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       drawWaveform();
 
-      // 4. PCM16 Streaming to Sherpa-ONNX Backend via WebSocket with Downsampling
-      const currentSampleRate = audioContext.sampleRate || 16000;
-      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-      combinedSource.connect(scriptProcessor);
-      scriptProcessor.connect(audioContext.destination);
+      // Preserve the captured rate so Sherpa can perform its native resampling.
+      audioSampleRate = ctx.sampleRate || 16000;
+      configureAudioSampleRate();
+      scriptProcessor = ctx.createScriptProcessor(4096, 2, 1);
+      merger.connect(scriptProcessor);
+      scriptProcessor.connect(ctx.destination);
+
+      // While the remote side is talking, the mic mostly hears it again through the
+      // speakers, so the mic is ducked and only the clean loopback copy is transcribed.
+      const gateBlock = 256;
+      const gateHoldSamples = Math.round(MIC_DUCK_HOLD_SECONDS * ctx.sampleRate);
+      let micHoldRemaining = 0;
+      let micGain = 1;
 
       scriptProcessor.onaudioprocess = (e) => {
         if (!isRecording) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcm16 = resampleAndConvertPCM16(inputData, currentSampleRate);
+        const device = e.inputBuffer.getChannelData(0);
+        const mic = e.inputBuffer.getChannelData(1);
+        const mixed = new Float32Array(device.length);
+
+        for (let start = 0; start < device.length; start += gateBlock) {
+          const end = Math.min(start + gateBlock, device.length);
+          let energy = 0;
+          for (let i = start; i < end; i++) energy += device[i] * device[i];
+          if (Math.sqrt(energy / (end - start)) >= DEVICE_SPEECH_RMS) {
+            micHoldRemaining = gateHoldSamples;
+          } else {
+            micHoldRemaining = Math.max(0, micHoldRemaining - (end - start));
+          }
+          const targetGain = micHoldRemaining > 0 ? 0 : 1;
+          for (let i = start; i < end; i++) {
+            micGain += (targetGain - micGain) * 0.01;
+            mixed[i] = device[i] + mic[i] * micGain;
+          }
+        }
+
+        const pcm16 = convertFloatToPCM16(mixed);
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
+          configureAudioSampleRate();
           websocket.send(pcm16.buffer);
         }
       };
@@ -480,19 +518,11 @@ document.addEventListener('DOMContentLoaded', () => {
         connectWebSocket();
       }
 
-      // 5. Browser Web Speech Recognition Engine (optional instantaneous interim text)
-      if (SpeechRecognition) {
-        setupSpeechRecognition();
-        isSpeechApiActive = true;
-      } else {
-        isSpeechApiActive = false;
-      }
-
       isRecording = true;
       updateUiOnStart();
       startTimer();
       const selectedSourceText = audioSourceSelect ? audioSourceSelect.options[audioSourceSelect.selectedIndex].text : 'Microphone';
-      showToast(`Listening: ${selectedSourceText}`);
+      showToast(`Listening: ${selectedSourceText}. Live draft updates use the offline model.`);
 
     } catch (err) {
       console.error('[Recording] Start failed:', err);
@@ -505,81 +535,16 @@ document.addEventListener('DOMContentLoaded', () => {
         deviceStream.getTracks().forEach(t => t.stop());
         deviceStream = null;
       }
-      if (audioContext) {
-        try { audioContext.close(); } catch (e) {}
-        audioContext = null;
+      if (ctx) {
+        try { ctx.close(); } catch (e) {}
       }
+      audioContext = null;
       isRecording = false;
       updateUiOnStop();
-      alert('Could not start audio:\n' + err.message + '\n\nTip: You can also click "Test Demo Speech" to test live speech transcription and MOM!');
-    }
-  }
-
-  // Setup Web Speech Recognition
-  function setupSpeechRecognition() {
-    if (!SpeechRecognition) return;
-
-    if (recognition) {
-      try { recognition.abort(); } catch (e) {}
-    }
-
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = languageSelect ? languageSelect.value : 'en-US';
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      console.log('[SpeechRecognition] Active and listening');
-      setLiveText('Listening... Speak or play meeting audio on device', false);
-      if (liveStatusText) liveStatusText.textContent = 'LISTENING';
-      if (liveBars) liveBars.style.display = 'inline-flex';
-    };
-
-    recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const res = event.results[i];
-        const text = res[0].transcript;
-        if (res.isFinal) {
-          if (text && text.trim()) {
-            appendRecognizedText(text.trim());
-          }
-        } else {
-          interim += text;
-        }
-      }
-
-      if (interim.trim()) {
-        setLiveText(`"${interim.trim()}"`, true);
-      } else {
-        setLiveText('Listening... Speak or play meeting audio on device', false);
-      }
-    };
-
-    let webSpeechNetworkError = false;
-    recognition.onerror = (event) => {
-      if (event.error === 'network') {
-        webSpeechNetworkError = true;
-        console.log('[Offline Engine] Operating 100% locally on Sherpa-ONNX ASR (air-gapped)');
-        return;
-      }
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        webSpeechNetworkError = true;
-      }
-      console.warn('[SpeechRecognition] Notice:', event.error);
-    };
-
-    recognition.onend = () => {
-      if (isRecording && !webSpeechNetworkError) {
-        try { recognition.start(); } catch (e) {}
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {
-      console.warn('[SpeechRecognition] Start notice:', e);
+      alert('Could not start offline transcription:\n' + err.message);
+    } finally {
+      isStartingRecording = false;
+      if (toggleRecordBtn) toggleRecordBtn.disabled = false;
     }
   }
 
@@ -587,13 +552,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function stopRecording() {
     if (!isRecording) return;
     isRecording = false;
-    isSpeechApiActive = false;
-
-    if (recognition) {
-      recognition.onend = null;
-      try { recognition.stop(); } catch (e) {}
-      recognition = null;
-    }
 
     if (micStream) {
       micStream.getTracks().forEach(track => track.stop());

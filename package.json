@@ -1,0 +1,57 @@
+{
+  "name": "mom-offline-transcriber",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline meeting transcription for Windows",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "python -m PyInstaller --noconfirm --clean --onedir --name MOMBackend --collect-all sherpa_onnx --collect-all uvicorn --paths backend backend/server.py",
+    "package:win": "npm run build:backend && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mom.offline.transcriber",
+    "productName": "MOM Offline Transcriber",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/MOMBackend",
+        "to": "backend"
+      },
+      {
+        "from": "frontend",
+        "to": "frontend"
+      },
+      {
+        "from": "models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+        "to": "models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+        "filter": [
+          "encoder.int8.onnx",
+          "decoder.int8.onnx",
+          "joiner.int8.onnx",
+          "tokens.txt"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "allowScripts": {
+    "electron@41.10.7": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

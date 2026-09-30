@@ -24,17 +24,15 @@ app.add_middleware(
 )
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.abspath(
+    os.environ.get("MOM_APP_ROOT")
+    or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 MODELS_PARENT_DIR = os.path.join(BASE_DIR, "models")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 def get_active_model_dir():
-    if os.path.exists(MODELS_PARENT_DIR):
-        for item in os.listdir(MODELS_PARENT_DIR):
-            full_path = os.path.join(MODELS_PARENT_DIR, item)
-            if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, "tokens.txt")):
-                return full_path
-    return os.path.join(MODELS_PARENT_DIR, "sherpa-onnx-streaming-zipformer-en-2023-06-26")
+    return os.path.join(MODELS_PARENT_DIR, SherpaTranscriber.MODEL_NAME)
 
 MODEL_DIR = get_active_model_dir()
 
@@ -57,12 +55,12 @@ def get_status():
     global transcriber, MODEL_DIR
     if not transcriber.is_loaded:
         active = get_active_model_dir()
-        if os.path.exists(active) and os.path.exists(os.path.join(active, "tokens.txt")):
+        if all(os.path.isfile(os.path.join(active, name)) for name in SherpaTranscriber.MODEL_FILES):
             MODEL_DIR = active
             transcriber.load_model(MODEL_DIR)
     return {
         "status": "ready",
-        "engine": "sherpa-onnx-offline",
+        "engine": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8-offline",
         "offline_mandatory": True,
         "model_dir": MODEL_DIR,
         "is_model_loaded": transcriber.is_loaded,
@@ -88,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
     if not transcriber.is_loaded:
         await websocket.send_json({
             "type": "status",
-            "message": "Sherpa-ONNX model operating in hybrid mode.",
+            "message": "Offline Sherpa-ONNX Parakeet model is not loaded. Transcription is unavailable.",
             "is_model_loaded": False
         })
 
@@ -120,7 +118,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
             elif "text" in message and message["text"]:
                 data = json.loads(message["text"])
-                if data.get("action") == "finalize":
+                if data.get("action") == "configure":
+                    sample_rate = int(data.get("sample_rate", transcriber.sample_rate))
+                    if 8000 <= sample_rate <= 96000:
+                        stream = transcriber.create_stream(sample_rate)
+                        last_interim = ""
+                elif data.get("action") == "finalize":
                     final_text = transcriber.finalize_stream(stream)
                     clean = (final_text or "").strip()
                     if clean:
@@ -143,4 +146,8 @@ if os.path.exists(FRONTEND_DIR):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(
+        app,
+        host=os.environ.get("MOM_SERVER_HOST", "127.0.0.1"),
+        port=int(os.environ.get("MOM_SERVER_PORT", "8000")),
+    )

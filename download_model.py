@@ -6,7 +6,7 @@ import urllib.request
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 # Primary and Mirror Download URLs
@@ -25,10 +25,12 @@ def download_progress(count, block_size, total_size):
 def ensure_model_exists():
     os.makedirs(MODEL_DIR, exist_ok=True)
     target_folder = os.path.join(MODEL_DIR, MODEL_NAME)
-    tokens = os.path.join(target_folder, "tokens.txt")
-    encoder = os.path.join(target_folder, "encoder-epoch-99-avg-1.onnx")
-    
-    if os.path.exists(tokens) and os.path.exists(encoder):
+    required_files = [
+        os.path.join(target_folder, name)
+        for name in ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+    ]
+
+    if all(os.path.isfile(path) for path in required_files):
         print(f"[OK] Model {MODEL_NAME} is already present at {target_folder}")
         return target_folder
 
@@ -48,7 +50,7 @@ def ensure_model_exists():
         except Exception as e:
             print(f"\n[WARN] Download from {url} failed: {e}")
 
-    print("[OFFLINE] No internet model download completed. Platform operating in Offline Browser ASR & NLP Engine Mode.")
+    print("[ERROR] The required ~630 MB Parakeet TDT 0.6B English model was not downloaded.")
     return None
 
 if __name__ == "__main__":

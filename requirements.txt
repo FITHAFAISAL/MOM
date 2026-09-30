@@ -1,0 +1,6 @@
+fastapi
+numpy
+pyinstaller
+sherpa-onnx
+uvicorn
+websockets

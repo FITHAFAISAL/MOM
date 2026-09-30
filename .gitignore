@@ -18,3 +18,9 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Node / Electron / PyInstaller build output
+node_modules/
+dist/
+build/
+*.spec

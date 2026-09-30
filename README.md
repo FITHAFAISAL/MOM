@@ -1,6 +1,6 @@
 # 🎙️ Sherpa-ONNX Real-Time Speech-to-Text & Minutes of Meeting (MOM) Platform
 
-An end-to-end, high-performance platform for real-time English speech transcription, speaker tracking, and automated Minutes of Meeting (MOM) generation powered by **Sherpa-ONNX** (Zipformer English model) and FastAPI.
+An end-to-end, high-performance platform for real-time English speech transcription, speaker tracking, and automated Minutes of Meeting (MOM) generation powered by **Sherpa-ONNX** (NVIDIA Parakeet TDT 0.6B English model) and FastAPI.
 
 ---
 
@@ -28,8 +28,8 @@ An end-to-end, high-performance platform for real-time English speech transcript
    - **Export Options**: One-click Copy MOM markdown, Save `.md` file, or Print / Save as PDF.
 
 4. **Speech Engine & Visuals**:
-   - Powered by native `sherpa-onnx` English streaming Zipformer model (`16,000 Hz`).
-   - Browser Web Speech API fallback with multi-language selector support.
+   - Powered by the `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` offline English model (~630 MB, `16,000 Hz`).
+   - Fully local Sherpa-ONNX transcription; no browser, cloud, or alternate-model fallback is used.
    - Live audio frequency waveform visualizer and pulse status badge.
    - Built-in "Test Demo Speech" stream for instant testing without a microphone.
 
@@ -47,8 +47,9 @@ sherpa-mom-platform/
 │   ├── index.html            # Main User Interface
 │   ├── styles.css            # Glassmorphism Styling & Responsive Layout
 │   └── app.js                # Web Audio PCM Sampler & Client Logic
-├── models/                   # Location for Sherpa-ONNX 630MB model
+├── models/                   # Sherpa-ONNX Parakeet TDT 0.6B English model (~630 MB)
 ├── download_model.py         # Automated Sherpa-ONNX Model Downloader
+├── electron/                 # Windows desktop application shell
 └── README.md
 ```
 
@@ -58,13 +59,18 @@ sherpa-mom-platform/
 
 ### 1. Requirements
 - Python 3.10+
-- Installed packages: `sherpa-onnx`, `fastapi`, `uvicorn`, `websockets`, `numpy`, `requests`
+- Install the Python packages while internet is available:
+```powershell
+python -m pip install -r requirements.txt
+```
 
-### 2. Download Sherpa-ONNX English Model (Optional)
-To download the ~630MB English Zipformer model:
+### 2. Download the Required 630 MB Sherpa-ONNX Parakeet Model
+Download `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` while internet is available. The app requires its encoder, decoder, joiner, and tokens; there is no other model to fall back to:
 ```bash
 python download_model.py
 ```
+
+This is a one-time download. The Parakeet offline recognizer refreshes a provisional transcript every 1.5 seconds while speech is active, then emits the final transcript after a pause. It does not use a browser or cloud speech-recognition fallback.
 
 ### 3. Start Server
 Run the FastAPI application:
@@ -77,3 +83,14 @@ Open your browser and navigate to:
 ```
 http://127.0.0.1:8000
 ```
+
+After installing the packages and downloading the model, the app can run without internet. Start the local server with `python backend/server.py`; microphone capture, transcription, and MOM generation are processed locally. Online meetings themselves still require an internet connection.
+
+### Windows Desktop App
+To build a Windows installer, install Node.js 22+ while online, then run:
+```powershell
+npm install
+npm run package:win
+```
+
+The build includes the Python backend and the model currently in `models/`. Install the generated setup executable from `dist/`. The desktop app captures Windows system audio directly through loopback when Device Audio is selected; no screen-share prompt is needed, and captured audio is sent only to the local transcription backend. Build dependencies and the model must be present before packaging. The installed app runs offline; joining an online meeting still requires internet.

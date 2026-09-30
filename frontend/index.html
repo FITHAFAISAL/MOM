@@ -4,11 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sherpa Voice - Real-Time Speech & MOM Platform</title>
-  <!-- Google Fonts & Font Awesome Icons -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="dark-theme">
@@ -28,7 +23,7 @@
 
       <div class="status-pill" id="engineStatusPill" title="Speech Engine Mode">
         <i class="fa-solid fa-microchip"></i>
-        <span id="engineStatusText">Sherpa / WebSpeech</span>
+          <span id="engineStatusText">Sherpa-ONNX Large (Offline)</span>
       </div>
       <div class="status-pill" id="audioModePill" title="Selected Audio Capture Mode">
         <i class="fa-solid fa-headphones"></i>
@@ -55,26 +50,18 @@
           <select id="audioSourceSelect">
             <option value="mic" selected>🎙️ Microphone Only</option>
             <option value="both">🎙️+💻 Both: Mic + Device Audio (Meeting Mode)</option>
-            <option value="device">💻 Device / System Audio (Meeting Tab or App)</option>
+            <option value="device">💻 Device / System Audio (Windows App or Browser)</option>
           </select>
           <button id="deviceAudioHelpBtn" class="help-circle-btn" title="How to capture device/meeting audio in browser" type="button">
-            <i class="fa-solid fa-circle-question"></i>
+            ?
           </button>
         </div>
 
-        <!-- Language Picker -->
-        <div class="language-picker-group" title="Speech Recognition Language">
+        <!-- The bundled offline model supports English only. -->
+        <div class="language-picker-group" title="Language supported by the offline model">
           <i class="fa-solid fa-globe"></i>
-          <select id="languageSelect">
-            <option value="en-US" selected>English (US)</option>
-            <option value="en-GB">English (UK)</option>
-            <option value="en-IN">English (India)</option>
-            <option value="es-ES">Spanish (Español)</option>
-            <option value="fr-FR">French (Français)</option>
-            <option value="de-DE">German (Deutsch)</option>
-            <option value="zh-CN">Chinese (Mandarin)</option>
-            <option value="ja-JP">Japanese</option>
-            <option value="ar-SA">Arabic</option>
+          <select aria-label="Offline transcription language" disabled>
+            <option>English (offline model)</option>
           </select>
         </div>
 
@@ -146,11 +133,11 @@
           <!-- Font Size Adjuster -->
           <div class="font-size-group">
             <button id="fontDecBtn" class="tool-btn-icon" title="Decrease font size">
-              <i class="fa-solid fa-minus"></i>
+              -
             </button>
             <span class="font-size-label" id="fontSizeLabel">16px</span>
             <button id="fontIncBtn" class="tool-btn-icon" title="Increase font size">
-              <i class="fa-solid fa-plus"></i>
+              +
             </button>
           </div>
 
@@ -220,7 +207,7 @@
           <button id="copyMomBtn" class="btn btn-sm btn-outline" title="Copy full MOM markdown"><i class="fa-solid fa-copy"></i> Copy MOM</button>
           <button id="exportMdBtn" class="btn btn-sm btn-outline" title="Download MOM as Markdown"><i class="fa-solid fa-file-code"></i> Save .md</button>
           <button id="exportPdfBtn" class="btn btn-sm btn-outline" title="Print or save as PDF"><i class="fa-solid fa-print"></i> Print / PDF</button>
-          <button id="closeMomModalBtn" class="modal-close-btn" title="Close MOM view"><i class="fa-solid fa-xmark"></i></button>
+          <button id="closeMomModalBtn" class="modal-close-btn" title="Close MOM view">X</button>
         </div>
       </div>
 
@@ -301,7 +288,7 @@
           <i class="fa-solid fa-laptop-code"></i>
           <h3>How to Capture Device & Meeting Audio</h3>
         </div>
-        <button id="closeGuideModalBtn" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+        <button id="closeGuideModalBtn" class="modal-close-btn" title="Close guide">X</button>
       </div>
       <div class="guide-modal-body">
         <p class="guide-intro">To transcribe speech from other attendees in <strong>Google Meet, Zoom, Microsoft Teams, YouTube</strong>, or any app playing sound on your device:</p>
@@ -318,16 +305,15 @@
           <div class="step-num">2</div>
           <div class="step-text">
             <strong>Click "Start Listening"</strong>:
-            <p>Your browser will show a sharing selection prompt.</p>
+            <p>The Windows desktop app captures system playback directly. In a browser, you'll be asked to select a tab or screen.</p>
           </div>
         </div>
 
         <div class="guide-step">
           <div class="step-num">3</div>
           <div class="step-text">
-            <strong>Enable Audio Sharing</strong>:
-            <p>• If sharing a <strong>Chrome/Edge Tab</strong> (e.g. Google Meet / YouTube): Ensure <strong>"Share tab audio"</strong> is checked.<br>
-            • If sharing <strong>Entire Screen</strong> (e.g. Zoom or Teams desktop app): Turn on <strong>"Also share system audio"</strong> toggle at the bottom.</p>
+            <strong>Keep audio on this device</strong>:
+            <p>The Windows app captures system audio locally and does not share your screen or audio with meeting participants. In a browser, enable the audio checkbox in the browser's sharing prompt.</p>
           </div>
         </div>
 
